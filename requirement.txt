@@ -2,4 +2,3 @@ streamlit
 json
 pandas
 plotly
-collections
