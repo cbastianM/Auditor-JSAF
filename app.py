@@ -189,25 +189,101 @@ def render_3d_model(data):
             mode='lines', line=dict(color=cmap.get(bt,"#748ffc"), width=3),
             name=bt, connectgaps=False))
 
+# ── Reemplazar el bloque "if show_panels:" completo con este ──
+
     if show_panels:
+        # Construir mapa de openings por superficie
+        opening_map = {}  # surface_id -> list of [(x,y,z), ...]
+        for op in data.get("SurfaceMemberOpenings", []):
+            sid = op.get("Surface", "")
+            pts_op = [nm.get(nid) for nid in op.get("Nodes", [])]
+            pts_op = [p for p in pts_op if p]
+            if len(pts_op) >= 3:
+                if sid not in opening_map:
+                    opening_map[sid] = []
+                opening_map[sid].append([(p["X"], p["Y"], p["Z"]) for p in pts_op])
+
+        def project_to_2d(points_3d):
+            if len(points_3d) < 3:
+                return [(p[0], p[1]) for p in points_3d]
+            p0, p1, p2 = points_3d[0], points_3d[1], points_3d[2]
+            v1 = (p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2])
+            v2 = (p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2])
+            nx = abs(v1[1]*v2[2] - v1[2]*v2[1])
+            ny = abs(v1[2]*v2[0] - v1[0]*v2[2])
+            nz = abs(v1[0]*v2[1] - v1[1]*v2[0])
+            if nz >= nx and nz >= ny:
+                return [(p[0], p[1]) for p in points_3d]
+            elif ny >= nx:
+                return [(p[0], p[2]) for p in points_3d]
+            else:
+                return [(p[1], p[2]) for p in points_3d]
+
+        def point_in_polygon_2d(px, py, polygon):
+            n = len(polygon)
+            inside = False
+            j = n - 1
+            for i in range(n):
+                xi, yi = polygon[i]
+                xj, yj = polygon[j]
+                if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+                    inside = not inside
+                j = i
+            return inside
+
         for stype, label, color, ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
                                               (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)")]:
             mx, ex = {"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}, {"x":[],"y":[],"z":[]}
             for surf in data.get("SurfaceMembers", []):
                 if surf.get("Type", 0) != stype: continue
+                surf_id = surf.get("Id", "")
                 pts = [nm.get(nid) for nid in surf.get("Nodes", [])]
                 pts = [p for p in pts if p]
                 if len(pts) < 3: continue
+
                 off = len(mx["x"])
                 for p in pts:
                     mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
+
+                # Obtener openings de este panel proyectados a 2D
+                surf_openings_2d = []
+                if surf_id in opening_map:
+                    panel_pts_3d = [(p["X"], p["Y"], p["Z"]) for p in pts]
+                    for op_3d in opening_map[surf_id]:
+                        op_2d = project_to_2d(op_3d)
+                        surf_openings_2d.append(op_2d)
+
+                # Triangular y filtrar triángulos dentro de openings
                 for t in range(len(pts)-2):
+                    p0 = pts[0]
+                    p1 = pts[t+1]
+                    p2 = pts[t+2]
+
+                    # Si hay openings, verificar centroide del triángulo
+                    if surf_openings_2d:
+                        cx = (p0["X"] + p1["X"] + p2["X"]) / 3
+                        cy = (p0["Y"] + p1["Y"] + p2["Y"]) / 3
+                        cz = (p0["Z"] + p1["Z"] + p2["Z"]) / 3
+                        centroid_2d = project_to_2d([(cx, cy, cz)])[0]
+
+                        inside_opening = False
+                        for op_2d in surf_openings_2d:
+                            if point_in_polygon_2d(centroid_2d[0], centroid_2d[1], op_2d):
+                                inside_opening = True
+                                break
+
+                        if inside_opening:
+                            continue  # No dibujar este triángulo
+
                     mx["i"].append(off); mx["j"].append(off+t+1); mx["k"].append(off+t+2)
+
+                # Bordes del contorno
                 for p in pts:
                     ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
                 ex["x"].extend([pts[0]["X"], None])
                 ex["y"].extend([pts[0]["Y"], None])
                 ex["z"].extend([pts[0]["Z"], None])
+
             if mx["x"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],
                     i=mx["i"],j=mx["j"],k=mx["k"],color=color,opacity=0.55,name=label,showlegend=True))
@@ -215,34 +291,7 @@ def render_3d_model(data):
                     mode='lines',line=dict(color=ecolor,width=2),
                     name=f"Bordes {label}",connectgaps=False,showlegend=False))
 
-    # Openings
-    if show_openings:
-        openings = data.get("SurfaceMemberOpenings", [])
-        if openings:
-            ox_list, oy_list, oz_list = [], [], []
-            for op in openings:
-                pts = [nm.get(nid) for nid in op.get("Nodes", [])]
-                pts = [p for p in pts if p]
-                if len(pts) < 3: continue
-                for p in pts:
-                    ox_list.append(p["X"]); oy_list.append(p["Y"]); oz_list.append(p["Z"])
-                ox_list.extend([pts[0]["X"], None])
-                oy_list.extend([pts[0]["Y"], None])
-                oz_list.extend([pts[0]["Z"], None])
-            if ox_list:
-                fig.add_trace(go.Scatter3d(x=ox_list, y=oy_list, z=oz_list,
-                    mode='lines', line=dict(color="#ff0", width=3),
-                    name="Aberturas", connectgaps=False))
-
-    no_grid = dict(showgrid=False, showline=False, zeroline=False, showbackground=False)
-    fig.update_layout(
-        scene=dict(xaxis=dict(title="X (m)", **no_grid),
-                   yaxis=dict(title="Y (m)", **no_grid),
-                   zaxis=dict(title="Z (m)", **no_grid),
-                   aspectmode='data', bgcolor='rgba(0,0,0,0)'),
-        margin=dict(l=0,r=0,t=30,b=0),height=600,template="plotly_dark",
-        legend=dict(orientation="h",y=1.02,x=0.5,xanchor="center"))
-    st.plotly_chart(fig, use_container_width=True)
+    
 
 
 # ═══════════════════════════════════════
