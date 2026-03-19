@@ -722,34 +722,139 @@ def render_validation(data):
             issues.append(f"Macro '{m.get('Name','')}' → superficie '{m.get('Surface','')}' no existe")
 
     # ── ADVERTENCIAS ──
-    # Resultados vacíos
-    z1 = sum(1 for r in data.get("Results1D",[]) if nz_ratio_1d(r)==0)
-    zm = sum(1 for r in data.get("MeshResults",[]) if nz_ratio_mesh(r)==0)
-    if z1: warns.append(f"Results1D: {z1}/{len(data.get('Results1D',[]))} vacíos")
-    if zm: warns.append(f"MeshResults: {zm}/{len(data.get('MeshResults',[]))} vacíos")
 
-    # Entidades vacías
-    empty = [k for k, v in data.items() if isinstance(v, list) and len(v) == 0]
-    if empty: warns.append(f"Entidades vacías: {', '.join(empty)}")
+    # Campos internos faltantes por elemento
+    # Barras
+    no_cs = [b.get("Name","?") for b in data.get("CurveMembers",[]) if not b.get("CrossSection")]
+    if no_cs: warns.append(f"{len(no_cs)} barras sin sección: {', '.join(no_cs[:5])}")
 
-    # Superficies sin material
-    no_mat = sum(1 for s in data.get("SurfaceMembers",[]) if not s.get("Materials"))
-    if no_mat: warns.append(f"{no_mat} superficies sin material asignado")
+    no_bar_nodes = [b.get("Name","?") for b in data.get("CurveMembers",[]) if not b.get("Nodes") or len(b.get("Nodes",[])) < 2]
+    if no_bar_nodes: warns.append(f"{len(no_bar_nodes)} barras sin nodos suficientes: {', '.join(no_bar_nodes[:5])}")
 
-    # Superficies sin región
+    no_bar_type = [b.get("Name","?") for b in data.get("CurveMembers",[]) if b.get("Type") is None]
+    if no_bar_type: warns.append(f"{len(no_bar_type)} barras sin tipo definido: {', '.join(no_bar_type[:5])}")
+
+    # Secciones
+    no_cs_mat = [cs.get("Name","?") for cs in data.get("CrossSections",[]) if not cs.get("Materials")]
+    if no_cs_mat: warns.append(f"{len(no_cs_mat)} secciones sin material: {', '.join(no_cs_mat[:5])}")
+
+    no_cs_params = [cs.get("Name","?") for cs in data.get("CrossSections",[]) if not cs.get("Parameters")]
+    if no_cs_params: warns.append(f"{len(no_cs_params)} secciones sin parámetros: {', '.join(no_cs_params[:5])}")
+
+    # Superficies
+    no_surf_mat = [s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Materials")]
+    if no_surf_mat: warns.append(f"{len(no_surf_mat)} superficies sin material: {', '.join(no_surf_mat[:5])}")
+
+    no_surf_thick = [s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Thickness") or s.get("Thickness",0) == 0]
+    if no_surf_thick: warns.append(f"{len(no_surf_thick)} superficies sin espesor: {', '.join(no_surf_thick[:5])}")
+
+    no_surf_nodes = [s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Nodes") or len(s.get("Nodes",[])) < 3]
+    if no_surf_nodes: warns.append(f"{len(no_surf_nodes)} superficies con menos de 3 nodos: {', '.join(no_surf_nodes[:5])}")
+
+    no_surf_edges = [s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Edges")]
+    if no_surf_edges: warns.append(f"{len(no_surf_edges)} superficies sin bordes: {', '.join(no_surf_edges[:5])}")
+
+    # Regiones
     reg_surfs = set(r.get("Surface","") for r in data.get("SurfaceMemberRegions",[]))
     no_reg = [s.get("Id") for s in data.get("SurfaceMembers",[]) if s.get("Id") not in reg_surfs]
     if no_reg: warns.append(f"{len(no_reg)} superficies sin región: {', '.join(no_reg[:10])}")
 
-    # Barras sin sección
-    no_cs = sum(1 for b in data.get("CurveMembers",[]) if not b.get("CrossSection"))
-    if no_cs: warns.append(f"{no_cs} barras sin sección asignada")
+    no_reg_thick = [r.get("Name","?") for r in data.get("SurfaceMemberRegions",[]) if not r.get("Thickness") or r.get("Thickness",0) == 0]
+    if no_reg_thick: warns.append(f"{len(no_reg_thick)} regiones sin espesor: {', '.join(no_reg_thick[:5])}")
+
+    no_reg_nodes = [r.get("Name","?") for r in data.get("SurfaceMemberRegions",[]) if not r.get("Nodes") or len(r.get("Nodes",[])) < 3]
+    if no_reg_nodes: warns.append(f"{len(no_reg_nodes)} regiones con menos de 3 nodos: {', '.join(no_reg_nodes[:5])}")
+
+    # Openings
+    no_op_nodes = [o.get("Name","?") for o in data.get("SurfaceMemberOpenings",[]) if not o.get("Nodes") or len(o.get("Nodes",[])) < 3]
+    if no_op_nodes: warns.append(f"{len(no_op_nodes)} aberturas con menos de 3 nodos: {', '.join(no_op_nodes[:5])}")
+
+    no_op_surf = [o.get("Name","?") for o in data.get("SurfaceMemberOpenings",[]) if not o.get("Surface")]
+    if no_op_surf: warns.append(f"{len(no_op_surf)} aberturas sin superficie asignada: {', '.join(no_op_surf[:5])}")
+
+    # Apoyos
+    no_sup_node = [s.get("Name","?") for s in data.get("PointSupports",[]) if not s.get("Node")]
+    if no_sup_node: warns.append(f"{len(no_sup_node)} apoyos sin nodo: {', '.join(no_sup_node[:5])}")
+
+    all_free = [s.get("Name","?") for s in data.get("PointSupports",[])
+                if s.get("Ux",0)==0 and s.get("Uy",0)==0 and s.get("Uz",0)==0
+                and s.get("Fix",0)==0 and s.get("Fiy",0)==0 and s.get("Fiz",0)==0]
+    if all_free: warns.append(f"{len(all_free)} apoyos con todos los DOF libres (inútiles): {', '.join(all_free[:5])}")
+
+    # Materiales
+    no_mat_e = [m.get("Name","?") for m in data.get("Materials",[]) if not m.get("EModulus") or m.get("EModulus",0) == 0]
+    if no_mat_e: warns.append(f"{len(no_mat_e)} materiales sin módulo E: {', '.join(no_mat_e[:5])}")
+
+    # Casos de carga
+    no_lc_name = sum(1 for c in data.get("LoadCases",[]) if not c.get("Name"))
+    if no_lc_name: warns.append(f"{no_lc_name} casos de carga sin nombre")
+
+    # Combinaciones
+    no_combo_cases = [c.get("Name","?") for c in data.get("LoadCombinations",[]) if not c.get("LoadCases")]
+    if no_combo_cases: warns.append(f"{len(no_combo_cases)} combinaciones sin casos: {', '.join(no_combo_cases[:5])}")
+
+    no_combo_factors = [c.get("Name","?") for c in data.get("LoadCombinations",[])
+                        if c.get("LoadCases") and (not c.get("LoadFactors") or len(c.get("LoadFactors",[])) != len(c.get("LoadCases",[])))]
+    if no_combo_factors: warns.append(f"{len(no_combo_factors)} combinaciones con factores incompletos: {', '.join(no_combo_factors[:5])}")
+
+    # Acciones
+    no_act_case = (sum(1 for a in data.get("PointActions",[]) if not a.get("LoadCase")) +
+                   sum(1 for a in data.get("CurveActions",[]) if not a.get("LoadCase")) +
+                   sum(1 for a in data.get("SurfaceActions",[]) if not a.get("LoadCase")))
+    if no_act_case: warns.append(f"{no_act_case} acciones sin caso de carga asignado")
+
+    no_act_ref = (sum(1 for a in data.get("PointActions",[]) if not a.get("ReferenceNode") and not a.get("ReferenceMember")) +
+                  sum(1 for a in data.get("CurveActions",[]) if not a.get("CurveMember")) +
+                  sum(1 for a in data.get("SurfaceActions",[]) if not a.get("SurfaceElement")))
+    if no_act_ref: warns.append(f"{no_act_ref} acciones sin elemento de referencia")
+
+    zero_actions = (sum(1 for a in data.get("PointActions",[]) if abs(a.get("X",0))+abs(a.get("Y",0))+abs(a.get("Z",0)) < 1e-10) +
+                    sum(1 for a in data.get("CurveActions",[]) if abs(a.get("X",0))+abs(a.get("Y",0))+abs(a.get("Z",0)) < 1e-10) +
+                    sum(1 for a in data.get("SurfaceActions",[]) if abs(a.get("Qx",0))+abs(a.get("Qy",0))+abs(a.get("Qz",0)) < 1e-10))
+    if zero_actions: warns.append(f"{zero_actions} acciones con valor cero en todas las componentes")
+
+    # Results1D
+    r1d_no_sections = [r.get("Name","?") for r in data.get("Results1D",[]) if not r.get("SectionsAt")]
+    if r1d_no_sections: warns.append(f"{len(r1d_no_sections)} resultados 1D sin posiciones de sección")
+
+    z1 = sum(1 for r in data.get("Results1D",[]) if nz_ratio_1d(r)==0)
+    if z1: warns.append(f"Results1D: {z1}/{len(data.get('Results1D',[]))} vacíos")
+
+    # MeshResults
+    zm = sum(1 for r in data.get("MeshResults",[]) if nz_ratio_mesh(r)==0)
+    if zm: warns.append(f"MeshResults: {zm}/{len(data.get('MeshResults',[]))} vacíos")
+
+    # Macros
+    no_macro_mesh = [m.get("Name","?") for m in data.get("Macros",[]) if not m.get("MeshNodes")]
+    if no_macro_mesh: warns.append(f"{len(no_macro_mesh)} macros sin nodos de malla")
+
+    # Cobertura: elementos sin resultados
+    bars_with_r1d = set(r.get("Member","") for r in data.get("Results1D",[]))
+    bars_no_results = bar_ids - bars_with_r1d
+    if bars_no_results and data.get("Results1D"):
+        warns.append(f"{len(bars_no_results)} barras sin resultados 1D: {', '.join(sorted(bars_no_results)[:10])}")
+
+    surfs_with_mesh = set(r.get("Member","") for r in data.get("MeshResults",[]))
+    surfs_no_results = surf_ids - surfs_with_mesh
+    if surfs_no_results and data.get("MeshResults"):
+        warns.append(f"{len(surfs_no_results)} superficies sin resultados de malla: {', '.join(sorted(surfs_no_results)[:10])}")
+
+    surfs_with_macro = set(m.get("Surface","") for m in data.get("Macros",[]))
+    surfs_no_macro = surf_ids - surfs_with_macro
+    if surfs_no_macro and data.get("Macros"):
+        warns.append(f"{len(surfs_no_macro)} superficies sin macro: {', '.join(sorted(surfs_no_macro)[:10])}")
+
+    # Entidades vacías
+    empty = [k for k, v in data.items() if isinstance(v, list) and len(v) == 0]
+    if empty: warns.append(f"Entidades vacías: {', '.join(empty)}")
 
     # Duplicados
     dup_surf = [k for k,v in Counter(s.get("Id") for s in data.get("SurfaceMembers",[])).items() if v > 1]
     if dup_surf: warns.append(f"IDs de superficie duplicados: {', '.join(dup_surf[:10])}")
     dup_bar = [k for k,v in Counter(b.get("Id") for b in data.get("CurveMembers",[])).items() if v > 1]
     if dup_bar: warns.append(f"IDs de barra duplicados: {', '.join(dup_bar[:10])}")
+    dup_node = [k for k,v in Counter(n.get("Id") for n in data.get("PointConnections",[])).items() if v > 1]
+    if dup_node: warns.append(f"IDs de nodo duplicados: {len(dup_node)} IDs")
 
     # ── MOSTRAR ──
     total_checks = len(issues) + len(warns)
