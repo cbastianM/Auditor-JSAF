@@ -188,7 +188,8 @@ def render_3d_model(data):
         fig.add_trace(go.Scatter3d(x=co["x"], y=co["y"], z=co["z"],
             mode='lines', line=dict(color=cmap.get(bt,"#748ffc"), width=3),
             name=bt, connectgaps=False))
-        # ── Reemplazar el bloque "if show_panels:" completo con este ──
+
+# ── Reemplazar el bloque "if show_panels:" completo con este ──
 
     if show_panels:
         # Construir mapa de openings por superficie
@@ -289,9 +290,6 @@ def render_3d_model(data):
                 fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],
                     mode='lines',line=dict(color=ecolor,width=2),
                     name=f"Bordes {label}",connectgaps=False,showlegend=False))
-
-
-
 
 # ═══════════════════════════════════════
 # BARRAS / SUPERFICIES / APOYOS
