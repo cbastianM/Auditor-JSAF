@@ -234,6 +234,110 @@ def render_3d_model(data):
                     opening_map[sid] = []
                 opening_map[sid].append([(p["X"], p["Y"], p["Z"]) for p in pts_op])
 
+        def triangulate_polygon_2d(pts_3d, openings_3d=None):
+            """Triangula un polígono 3D proyectándolo a 2D, filtrando triángulos fuera del contorno y dentro de openings"""
+            if len(pts_3d) < 3:
+                return []
+
+            pts_2d = project_to_2d([(p["X"], p["Y"], p["Z"]) for p in pts_3d])
+
+            # Ear-clipping simple para polígonos convexos y cóncavos
+            triangles = []
+            indices = list(range(len(pts_2d)))
+
+            # Intentar ear-clipping
+            max_iter = len(indices) * 3
+            iteration = 0
+            while len(indices) > 2 and iteration < max_iter:
+                iteration += 1
+                found_ear = False
+                n = len(indices)
+                for i in range(n):
+                    prev_idx = indices[(i - 1) % n]
+                    curr_idx = indices[i]
+                    next_idx = indices[(i + 1) % n]
+
+                    # Verificar que el triángulo tiene orientación correcta (ear)
+                    ax, ay = pts_2d[prev_idx]
+                    bx, by = pts_2d[curr_idx]
+                    cx, cy = pts_2d[next_idx]
+
+                    cross = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+
+                    # Determinar orientación del polígono
+                    if iteration == 1 and i == 0:
+                        area = 0
+                        for j in range(len(indices)):
+                            j1 = indices[j]
+                            j2 = indices[(j + 1) % len(indices)]
+                            area += pts_2d[j1][0] * pts_2d[j2][1]
+                            area -= pts_2d[j2][0] * pts_2d[j1][1]
+                        poly_sign = 1 if area > 0 else -1
+
+                    if not hasattr(triangulate_polygon_2d, '_poly_sign'):
+                        area = 0
+                        for j in range(len(indices)):
+                            j1 = indices[j]
+                            j2 = indices[(j + 1) % len(indices)]
+                            area += pts_2d[j1][0] * pts_2d[j2][1]
+                            area -= pts_2d[j2][0] * pts_2d[j1][1]
+                        triangulate_polygon_2d._poly_sign = 1 if area > 0 else -1
+
+                    if cross * triangulate_polygon_2d._poly_sign <= 0:
+                        continue
+
+                    # Verificar que ningún otro vértice cae dentro del triángulo
+                    ear_ok = True
+                    for j in range(n):
+                        idx = indices[j]
+                        if idx in (prev_idx, curr_idx, next_idx):
+                            continue
+                        if point_in_triangle(pts_2d[idx], pts_2d[prev_idx], pts_2d[curr_idx], pts_2d[next_idx]):
+                            ear_ok = False
+                            break
+
+                    if ear_ok:
+                        triangles.append((prev_idx, curr_idx, next_idx))
+                        indices.pop(i)
+                        found_ear = True
+                        break
+
+                if not found_ear:
+                    break
+
+            # Limpiar atributo temporal
+            if hasattr(triangulate_polygon_2d, '_poly_sign'):
+                del triangulate_polygon_2d._poly_sign
+
+            # Filtrar triángulos dentro de openings
+            if openings_3d:
+                openings_2d = [project_to_2d(op) for op in openings_3d]
+                filtered = []
+                for tri in triangles:
+                    i0, i1, i2 = tri
+                    cx = (pts_2d[i0][0] + pts_2d[i1][0] + pts_2d[i2][0]) / 3
+                    cy = (pts_2d[i0][1] + pts_2d[i1][1] + pts_2d[i2][1]) / 3
+                    inside = False
+                    for op_2d in openings_2d:
+                        if point_in_polygon_2d(cx, cy, op_2d):
+                            inside = True
+                            break
+                    if not inside:
+                        filtered.append(tri)
+                triangles = filtered
+
+            return triangles
+
+        def point_in_triangle(p, a, b, c):
+            def sign(p1, p2, p3):
+                return (p1[0] - p3[0]) * (p2[1] - p3[1]) - (p2[0] - p3[0]) * (p1[1] - p3[1])
+            d1 = sign(p, a, b)
+            d2 = sign(p, b, c)
+            d3 = sign(p, c, a)
+            has_neg = (d1 < 0) or (d2 < 0) or (d3 < 0)
+            has_pos = (d1 > 0) or (d2 > 0) or (d3 > 0)
+            return not (has_neg and has_pos)
+
         for stype, label, color, ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
                                               (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)")]:
             mx = {"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
@@ -249,30 +353,16 @@ def render_3d_model(data):
                 for p in pts:
                     mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
 
-                # Proyectar openings a 2D para test punto-en-polígono
-                surf_openings_2d = []
-                if surf_id in opening_map:
-                    for op_3d in opening_map[surf_id]:
-                        surf_openings_2d.append(project_to_2d(op_3d))
+                # Openings de este panel
+                surf_openings = opening_map.get(surf_id, None)
 
-                for t in range(len(pts)-2):
-                    p0, p1, p2 = pts[0], pts[t+1], pts[t+2]
+                # Triangular con ear-clipping
+                tris = triangulate_polygon_2d(pts, surf_openings)
 
-                    if surf_openings_2d:
-                        cx = (p0["X"] + p1["X"] + p2["X"]) / 3
-                        cy = (p0["Y"] + p1["Y"] + p2["Y"]) / 3
-                        cz = (p0["Z"] + p1["Z"] + p2["Z"]) / 3
-                        c2d = project_to_2d([(cx, cy, cz)])[0]
-
-                        skip = False
-                        for op_2d in surf_openings_2d:
-                            if point_in_polygon_2d(c2d[0], c2d[1], op_2d):
-                                skip = True
-                                break
-                        if skip:
-                            continue
-
-                    mx["i"].append(off); mx["j"].append(off+t+1); mx["k"].append(off+t+2)
+                for i0, i1, i2 in tris:
+                    mx["i"].append(off + i0)
+                    mx["j"].append(off + i1)
+                    mx["k"].append(off + i2)
 
                 for p in pts:
                     ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
