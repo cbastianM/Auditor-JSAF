@@ -67,6 +67,38 @@ def nz_ratio_mesh(r):
 
 
 # ═══════════════════════════════════════
+# HELPERS 2D GEOMETRY
+# ═══════════════════════════════════════
+def project_to_2d(points_3d):
+    if len(points_3d) < 3:
+        return [(p[0], p[1]) for p in points_3d]
+    p0, p1, p2 = points_3d[0], points_3d[1], points_3d[2]
+    v1 = (p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2])
+    v2 = (p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2])
+    nx = abs(v1[1]*v2[2] - v1[2]*v2[1])
+    ny = abs(v1[2]*v2[0] - v1[0]*v2[2])
+    nz = abs(v1[0]*v2[1] - v1[1]*v2[0])
+    if nz >= nx and nz >= ny:
+        return [(p[0], p[1]) for p in points_3d]
+    elif ny >= nx:
+        return [(p[0], p[2]) for p in points_3d]
+    else:
+        return [(p[1], p[2]) for p in points_3d]
+
+def point_in_polygon_2d(px, py, polygon):
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+# ═══════════════════════════════════════
 # RESUMEN
 # ═══════════════════════════════════════
 def render_overview(data):
@@ -78,7 +110,8 @@ def render_overview(data):
 
     groups = [
         ("GEOMETRÍA", [("Materials","Materiales"),("CrossSections","Secciones"),("PointConnections","Nodos"),
-            ("CurveMembers","Barras"),("SurfaceMembers","Superficies"),("SurfaceMemberOpenings","Aberturas"),("PointSupports","Apoyos")]),
+            ("CurveMembers","Barras"),("SurfaceMembers","Superficies"),("SurfaceMemberOpenings","Aberturas"),
+            ("SurfaceMemberRegions","Regiones"),("PointSupports","Apoyos")]),
         ("CARGAS", [("LoadCases","Casos"),("LoadCombinations","Combinaciones"),
             ("PointActions","Puntuales"),("CurveActions","Lineales"),("SurfaceActions","Superficiales")]),
         ("RESULTADOS", [("Results1D","1D Barras"),("MeshResults","2D Malla"),("Macros","Macros")]),
@@ -189,11 +222,9 @@ def render_3d_model(data):
             mode='lines', line=dict(color=cmap.get(bt,"#748ffc"), width=3),
             name=bt, connectgaps=False))
 
-# ── Reemplazar el bloque "if show_panels:" completo con este ──
-
     if show_panels:
-        # Construir mapa de openings por superficie
-        opening_map = {}  # surface_id -> list of [(x,y,z), ...]
+        # Mapa de openings por superficie
+        opening_map = {}
         for op in data.get("SurfaceMemberOpenings", []):
             sid = op.get("Surface", "")
             pts_op = [nm.get(nid) for nid in op.get("Nodes", [])]
@@ -203,37 +234,10 @@ def render_3d_model(data):
                     opening_map[sid] = []
                 opening_map[sid].append([(p["X"], p["Y"], p["Z"]) for p in pts_op])
 
-        def project_to_2d(points_3d):
-            if len(points_3d) < 3:
-                return [(p[0], p[1]) for p in points_3d]
-            p0, p1, p2 = points_3d[0], points_3d[1], points_3d[2]
-            v1 = (p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2])
-            v2 = (p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2])
-            nx = abs(v1[1]*v2[2] - v1[2]*v2[1])
-            ny = abs(v1[2]*v2[0] - v1[0]*v2[2])
-            nz = abs(v1[0]*v2[1] - v1[1]*v2[0])
-            if nz >= nx and nz >= ny:
-                return [(p[0], p[1]) for p in points_3d]
-            elif ny >= nx:
-                return [(p[0], p[2]) for p in points_3d]
-            else:
-                return [(p[1], p[2]) for p in points_3d]
-
-        def point_in_polygon_2d(px, py, polygon):
-            n = len(polygon)
-            inside = False
-            j = n - 1
-            for i in range(n):
-                xi, yi = polygon[i]
-                xj, yj = polygon[j]
-                if ((yi > py) != (yj > py)) and (px < (xj - xi) * (py - yi) / (yj - yi) + xi):
-                    inside = not inside
-                j = i
-            return inside
-
         for stype, label, color, ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
                                               (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)")]:
-            mx, ex = {"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}, {"x":[],"y":[],"z":[]}
+            mx = {"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
+            ex = {"x":[],"y":[],"z":[]}
             for surf in data.get("SurfaceMembers", []):
                 if surf.get("Type", 0) != stype: continue
                 surf_id = surf.get("Id", "")
@@ -245,39 +249,31 @@ def render_3d_model(data):
                 for p in pts:
                     mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
 
-                # Obtener openings de este panel proyectados a 2D
+                # Proyectar openings a 2D para test punto-en-polígono
                 surf_openings_2d = []
                 if surf_id in opening_map:
-                    panel_pts_3d = [(p["X"], p["Y"], p["Z"]) for p in pts]
                     for op_3d in opening_map[surf_id]:
-                        op_2d = project_to_2d(op_3d)
-                        surf_openings_2d.append(op_2d)
+                        surf_openings_2d.append(project_to_2d(op_3d))
 
-                # Triangular y filtrar triángulos dentro de openings
                 for t in range(len(pts)-2):
-                    p0 = pts[0]
-                    p1 = pts[t+1]
-                    p2 = pts[t+2]
+                    p0, p1, p2 = pts[0], pts[t+1], pts[t+2]
 
-                    # Si hay openings, verificar centroide del triángulo
                     if surf_openings_2d:
                         cx = (p0["X"] + p1["X"] + p2["X"]) / 3
                         cy = (p0["Y"] + p1["Y"] + p2["Y"]) / 3
                         cz = (p0["Z"] + p1["Z"] + p2["Z"]) / 3
-                        centroid_2d = project_to_2d([(cx, cy, cz)])[0]
+                        c2d = project_to_2d([(cx, cy, cz)])[0]
 
-                        inside_opening = False
+                        skip = False
                         for op_2d in surf_openings_2d:
-                            if point_in_polygon_2d(centroid_2d[0], centroid_2d[1], op_2d):
-                                inside_opening = True
+                            if point_in_polygon_2d(c2d[0], c2d[1], op_2d):
+                                skip = True
                                 break
-
-                        if inside_opening:
-                            continue  # No dibujar este triángulo
+                        if skip:
+                            continue
 
                     mx["i"].append(off); mx["j"].append(off+t+1); mx["k"].append(off+t+2)
 
-                # Bordes del contorno
                 for p in pts:
                     ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
                 ex["x"].extend([pts[0]["X"], None])
@@ -290,6 +286,35 @@ def render_3d_model(data):
                 fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],
                     mode='lines',line=dict(color=ecolor,width=2),
                     name=f"Bordes {label}",connectgaps=False,showlegend=False))
+
+    if show_openings:
+        openings = data.get("SurfaceMemberOpenings", [])
+        if openings:
+            ox_list, oy_list, oz_list = [], [], []
+            for op in openings:
+                pts = [nm.get(nid) for nid in op.get("Nodes", [])]
+                pts = [p for p in pts if p]
+                if len(pts) < 3: continue
+                for p in pts:
+                    ox_list.append(p["X"]); oy_list.append(p["Y"]); oz_list.append(p["Z"])
+                ox_list.extend([pts[0]["X"], None])
+                oy_list.extend([pts[0]["Y"], None])
+                oz_list.extend([pts[0]["Z"], None])
+            if ox_list:
+                fig.add_trace(go.Scatter3d(x=ox_list, y=oy_list, z=oz_list,
+                    mode='lines', line=dict(color="#ff0", width=3),
+                    name="Aberturas", connectgaps=False))
+
+    no_grid = dict(showgrid=False, showline=False, zeroline=False, showbackground=False)
+    fig.update_layout(
+        scene=dict(xaxis=dict(title="X (m)", **no_grid),
+                   yaxis=dict(title="Y (m)", **no_grid),
+                   zaxis=dict(title="Z (m)", **no_grid),
+                   aspectmode='data', bgcolor='rgba(0,0,0,0)'),
+        margin=dict(l=0,r=0,t=30,b=0),height=600,template="plotly_dark",
+        legend=dict(orientation="h",y=1.02,x=0.5,xanchor="center"))
+    st.plotly_chart(fig, use_container_width=True)
+
 
 # ═══════════════════════════════════════
 # BARRAS / SUPERFICIES / APOYOS
@@ -331,6 +356,15 @@ def render_surfaces(data):
                  "Espesor":s.get("Thickness",""),"Nodos":len(s.get("Nodes",[])),
                  "Material":", ".join(mm.get(mid,mid[:8]) for mid in s.get("Materials",[]))} for s in surfs]
         st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True,height=300)
+
+    regs = data.get("SurfaceMemberRegions",[])
+    if regs:
+        st.markdown(f"**Regiones:** {len(regs)}")
+        st.dataframe(pd.DataFrame([{"ID":r.get("Id",""),"Nombre":r.get("Name",""),
+            "Superficie":r.get("Surface",""),"Espesor":r.get("Thickness",""),
+            "Nodos":len(r.get("Nodes",[]))} for r in regs]),
+            use_container_width=True,hide_index=True,height=200)
+
     ops = data.get("SurfaceMemberOpenings",[])
     if ops:
         st.markdown(f"**Aberturas:** {len(ops)}")
@@ -399,7 +433,7 @@ def render_actions(data):
 
 
 # ═══════════════════════════════════════
-# RESULTS 1D - HEATMAP MATRIX
+# RESULTS 1D
 # ═══════════════════════════════════════
 def render_results_1d(data):
     st.markdown('<p class="section-header">📈 Resultados 1D (Fuerzas Internas)</p>', unsafe_allow_html=True)
@@ -417,52 +451,41 @@ def render_results_1d(data):
         ratio = nz_ratio_1d(r)
         if bid not in bar_summary:
             bar_summary[bid] = {"nonzero": 0, "zero": 0, "max_vals": {c: 0 for c in COMPS_1D}}
-        if ratio > 0:
-            bar_summary[bid]["nonzero"] += 1
-        else:
-            bar_summary[bid]["zero"] += 1
+        if ratio > 0: bar_summary[bid]["nonzero"] += 1
+        else: bar_summary[bid]["zero"] += 1
         for c in COMPS_1D:
             vals = [abs(v) for v in r.get(c, [])]
-            if vals:
-                bar_summary[bid]["max_vals"][c] = max(bar_summary[bid]["max_vals"][c], max(vals))
+            if vals: bar_summary[bid]["max_vals"][c] = max(bar_summary[bid]["max_vals"][c], max(vals))
 
     total = len(results)
     full = sum(1 for r in results if nz_ratio_1d(r) == 1.0)
     partial = sum(1 for r in results if 0 < nz_ratio_1d(r) < 1.0)
     empty = sum(1 for r in results if nz_ratio_1d(r) == 0)
     mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("Total", total)
-    mc2.metric("🟢 Completos", full)
-    mc3.metric("🟡 Parciales", partial)
-    mc4.metric("🔴 Vacíos", empty)
+    mc1.metric("Total", total); mc2.metric("🟢 Completos", full)
+    mc3.metric("🟡 Parciales", partial); mc4.metric("🔴 Vacíos", empty)
 
     rows = []
     for bid in sorted(bar_summary.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-        info = bar_summary[bid]
-        mv = info["max_vals"]
-        rows.append({
-            "Barra": f"Bar {bid}", "bar_id": bid,
+        info = bar_summary[bid]; mv = info["max_vals"]
+        rows.append({"Barra": f"Bar {bid}", "bar_id": bid,
             "Estado": "✅" if info["nonzero"] > 0 else "⬜",
             "Casos ≠0": info["nonzero"], "Casos =0": info["zero"],
             "|N|": f"{mv['aN']:.2f}", "|Vy|": f"{mv['aVy']:.2f}", "|Vz|": f"{mv['aVz']:.2f}",
-            "|Mx|": f"{mv['aMx']:.2f}", "|My|": f"{mv['aMy']:.2f}", "|Mz|": f"{mv['aMz']:.2f}",
-        })
+            "|Mx|": f"{mv['aMx']:.2f}", "|My|": f"{mv['aMy']:.2f}", "|Mz|": f"{mv['aMz']:.2f}"})
     df = pd.DataFrame(rows)
 
     filt = st.radio("Filtrar:", ["Todos", "Con valores ≠ 0", "Todo cero"], horizontal=True, key="f1d")
     if filt == "Con valores ≠ 0": df = df[df["Estado"] == "✅"]
     elif filt == "Todo cero": df = df[df["Estado"] == "⬜"]
-
     st.dataframe(df.drop(columns=["bar_id"]), use_container_width=True, hide_index=True, height=300)
 
-    st.markdown("---")
-    st.markdown("#### 📊 Diagrama detallado")
+    st.markdown("---"); st.markdown("#### 📊 Diagrama detallado")
     bar_ids = df["bar_id"].tolist()
     if not bar_ids: return
 
     load_ids = sorted(set(r.get("Load","") for r in results))
     load_names = [lm.get(lid, lid[:8]) for lid in load_ids]
-
     sc1, sc2 = st.columns(2)
     sel_bar = sc1.selectbox("Barra:", bar_ids, format_func=lambda x: f"Bar {x}", key="sel_bar")
     sel_load_name = sc2.selectbox("Caso:", load_names, key="sel_load")
@@ -471,8 +494,7 @@ def render_results_1d(data):
     r = result_index.get((sel_bar, sel_load))
     if not r: return st.warning("Sin resultado.")
 
-    ratio = nz_ratio_1d(r)
-    nz_count = int(ratio * 6)
+    ratio = nz_ratio_1d(r); nz_count = int(ratio * 6)
     if ratio == 1.0: st.success(f"✅ Completo — {nz_count}/6 componentes")
     elif ratio > 0: st.warning(f"🟡 Parcial — {nz_count}/6 componentes")
     else: st.error("🔴 Vacío — 0/6 componentes")
@@ -502,7 +524,7 @@ def render_results_1d(data):
 
 
 # ═══════════════════════════════════════
-# MESH RESULTS - HEATMAP MATRIX
+# MESH RESULTS
 # ═══════════════════════════════════════
 def render_mesh_results(data):
     st.markdown('<p class="section-header">🔺 Resultados Malla 2D</p>', unsafe_allow_html=True)
@@ -511,62 +533,48 @@ def render_mesh_results(data):
 
     lm = {**id_name_map(data.get("LoadCases",[])), **id_name_map(data.get("LoadCombinations",[]))}
 
-    result_index = {}
-    panel_summary = {}
+    result_index = {}; panel_summary = {}
     for r in results:
-        pid = r.get("Member", "")
-        lid = r.get("Load", "")
-        result_index[(pid, lid)] = r
-        ratio = nz_ratio_mesh(r)
+        pid = r.get("Member", ""); lid = r.get("Load", "")
+        result_index[(pid, lid)] = r; ratio = nz_ratio_mesh(r)
         if pid not in panel_summary:
             panel_summary[pid] = {"nonzero": 0, "zero": 0, "max_vals": {c: 0 for c in COMPS_MESH}}
-        if ratio > 0:
-            panel_summary[pid]["nonzero"] += 1
-        else:
-            panel_summary[pid]["zero"] += 1
+        if ratio > 0: panel_summary[pid]["nonzero"] += 1
+        else: panel_summary[pid]["zero"] += 1
         for c in COMPS_MESH:
             vals = [abs(v) for v in r.get(c, [])]
-            if vals:
-                panel_summary[pid]["max_vals"][c] = max(panel_summary[pid]["max_vals"][c], max(vals))
+            if vals: panel_summary[pid]["max_vals"][c] = max(panel_summary[pid]["max_vals"][c], max(vals))
 
     total = len(results)
     full = sum(1 for r in results if nz_ratio_mesh(r) == 1.0)
     partial = sum(1 for r in results if 0 < nz_ratio_mesh(r) < 1.0)
     empty = sum(1 for r in results if nz_ratio_mesh(r) == 0)
     mc1, mc2, mc3, mc4 = st.columns(4)
-    mc1.metric("Total", total)
-    mc2.metric("🟢 Completos", full)
-    mc3.metric("🟡 Parciales", partial)
-    mc4.metric("🔴 Vacíos", empty)
+    mc1.metric("Total", total); mc2.metric("🟢 Completos", full)
+    mc3.metric("🟡 Parciales", partial); mc4.metric("🔴 Vacíos", empty)
 
     rows = []
     for pid in sorted(panel_summary.keys(), key=lambda x: int(x) if x.isdigit() else 0):
-        info = panel_summary[pid]
-        mv = info["max_vals"]
-        rows.append({
-            "Panel": f"Panel {pid}", "panel_id": pid,
+        info = panel_summary[pid]; mv = info["max_vals"]
+        rows.append({"Panel": f"Panel {pid}", "panel_id": pid,
             "Estado": "✅" if info["nonzero"] > 0 else "⬜",
             "Casos ≠0": info["nonzero"], "Casos =0": info["zero"],
             "|mx|": f"{mv['amx']:.2f}", "|my|": f"{mv['amy']:.2f}",
             "|nx|": f"{mv['anx']:.2f}", "|ny|": f"{mv['any']:.2f}",
-            "|vx|": f"{mv['avx']:.2f}", "|vy|": f"{mv['avy']:.2f}",
-        })
+            "|vx|": f"{mv['avx']:.2f}", "|vy|": f"{mv['avy']:.2f}"})
     df = pd.DataFrame(rows)
 
     filt = st.radio("Filtrar:", ["Todos", "Con valores ≠ 0", "Todo cero"], horizontal=True, key="fmesh")
     if filt == "Con valores ≠ 0": df = df[df["Estado"] == "✅"]
     elif filt == "Todo cero": df = df[df["Estado"] == "⬜"]
-
     st.dataframe(df.drop(columns=["panel_id"]), use_container_width=True, hide_index=True, height=300)
 
-    st.markdown("---")
-    st.markdown("#### 📊 Diagrama detallado")
+    st.markdown("---"); st.markdown("#### 📊 Diagrama detallado")
     panel_ids = df["panel_id"].tolist()
     if not panel_ids: return
 
     load_ids = sorted(set(r.get("Load","") for r in results))
     load_names = [lm.get(lid, lid[:8]) for lid in load_ids]
-
     sc1, sc2 = st.columns(2)
     sel_panel = sc1.selectbox("Panel:", panel_ids, format_func=lambda x: f"Panel {x}", key="sel_panel")
     sel_load_name = sc2.selectbox("Caso:", load_names, key="sel_load_m")
@@ -575,8 +583,7 @@ def render_mesh_results(data):
     r = result_index.get((sel_panel, sel_load))
     if not r: return st.warning("Sin resultado.")
 
-    ratio = nz_ratio_mesh(r)
-    nz_count = int(ratio * 8)
+    ratio = nz_ratio_mesh(r); nz_count = int(ratio * 8)
     if ratio == 1.0: st.success(f"✅ Completo — {nz_count}/8 componentes")
     elif ratio > 0: st.warning(f"🟡 Parcial — {nz_count}/8 componentes")
     else: st.error("🔴 Vacío — 0/8 componentes")
@@ -596,57 +603,210 @@ def render_mesh_results(data):
                           height=350, margin=dict(t=20, b=40))
         st.plotly_chart(fig, use_container_width=True)
         vc1, vc2, vc3 = st.columns(3)
-        vc1.metric("Mín", f"{min(vals):.3f}")
-        vc2.metric("Máx", f"{max(vals):.3f}")
-        vc3.metric("Nodos FE", len(vals))
+        vc1.metric("Mín", f"{min(vals):.3f}"); vc2.metric("Máx", f"{max(vals):.3f}"); vc3.metric("Nodos FE", len(vals))
 
 
 # ═══════════════════════════════════════
-# VALIDACIÓN / JSON
+# VALIDACIÓN
 # ═══════════════════════════════════════
 def render_validation(data):
     st.markdown('<p class="section-header">✅ Validación</p>', unsafe_allow_html=True)
-    issues, warns = [], []
+
+    # Construir conjuntos de IDs
     mat_ids = set(m.get("Id") for m in data.get("Materials",[]))
     cs_ids = set(s.get("Id") for s in data.get("CrossSections",[]))
     node_ids = set(n.get("Id") for n in data.get("PointConnections",[]))
-    lc_ids = set(c.get("Id") for c in data.get("LoadCases",[]))
-    surf_ids = set(s.get("Id") for s in data.get("SurfaceMembers",[]))
     bar_ids = set(b.get("Id") for b in data.get("CurveMembers",[]))
+    surf_ids = set(s.get("Id") for s in data.get("SurfaceMembers",[]))
+    lc_ids = set(c.get("Id") for c in data.get("LoadCases",[]))
+    combo_ids = set(c.get("Id") for c in data.get("LoadCombinations",[]))
+    all_load_ids = lc_ids | combo_ids
+
+    issues = []
+    warns = []
+
+    # ── REFERENCIAS CRUZADAS ──
+    # Secciones → Materiales
     for cs in data.get("CrossSections",[]):
         for mid in cs.get("Materials",[]):
-            if mid not in mat_ids: issues.append(f"Sección '{cs.get('Name')}' → material inexistente")
+            if mid not in mat_ids:
+                issues.append(f"Sección '{cs.get('Name','')}' → material '{mid[:12]}' no existe")
+
+    # Barras → Secciones y Nodos
     for b in data.get("CurveMembers",[]):
-        if b.get("CrossSection","") and b["CrossSection"] not in cs_ids:
-            issues.append(f"Barra '{b.get('Name')}' → sección inexistente")
+        csid = b.get("CrossSection","")
+        if csid and csid not in cs_ids:
+            issues.append(f"Barra '{b.get('Name','')}' → sección '{csid[:12]}' no existe")
         for nid in b.get("Nodes",[]):
-            if nid not in node_ids: issues.append(f"Barra '{b.get('Name')}' → nodo {nid} inexistente")
+            if nid not in node_ids:
+                issues.append(f"Barra '{b.get('Name','')}' → nodo '{nid}' no existe")
+
+    # Superficies → Nodos y Materiales
     for s in data.get("SurfaceMembers",[]):
         for nid in s.get("Nodes",[]):
-            if nid not in node_ids: issues.append(f"Superficie '{s.get('Name')}' → nodo {nid} inexistente")
-    for sup in data.get("PointSupports",[]):
-        if sup.get("Node","") and sup["Node"] not in node_ids:
-            issues.append(f"Apoyo '{sup.get('Name')}' → nodo inexistente")
+            if nid not in node_ids:
+                issues.append(f"Superficie '{s.get('Name','')}' → nodo '{nid}' no existe")
+        for mid in s.get("Materials",[]):
+            if mid not in mat_ids:
+                issues.append(f"Superficie '{s.get('Name','')}' → material '{mid[:12]}' no existe")
+
+    # Regiones → Superficies y Nodos
+    for r in data.get("SurfaceMemberRegions",[]):
+        sid = r.get("Surface","")
+        if sid and sid not in surf_ids:
+            issues.append(f"Región '{r.get('Name','')}' → superficie '{sid}' no existe")
+        for nid in r.get("Nodes",[]):
+            if nid not in node_ids:
+                issues.append(f"Región '{r.get('Name','')}' → nodo '{nid}' no existe")
+
+    # Openings → Superficies y Nodos
     for o in data.get("SurfaceMemberOpenings",[]):
-        if o.get("Surface","") not in surf_ids:
-            issues.append(f"Abertura '{o.get('Name')}' → superficie inexistente")
-    r1d_o = set(r.get("Member") for r in data.get("Results1D",[])) - bar_ids
-    if r1d_o: warns.append(f"Results1D: {len(r1d_o)} barras huérfanas")
-    mr_o = set(r.get("Member") for r in data.get("MeshResults",[])) - surf_ids
-    if mr_o: warns.append(f"MeshResults: {len(mr_o)} paneles huérfanos")
+        sid = o.get("Surface","")
+        if sid and sid not in surf_ids:
+            issues.append(f"Abertura '{o.get('Name','')}' → superficie '{sid}' no existe")
+        for nid in o.get("Nodes",[]):
+            if nid not in node_ids:
+                issues.append(f"Abertura '{o.get('Name','')}' → nodo '{nid}' no existe")
+
+    # Apoyos → Nodos
+    for sup in data.get("PointSupports",[]):
+        nid = sup.get("Node","")
+        if nid and nid not in node_ids:
+            issues.append(f"Apoyo '{sup.get('Name','')}' → nodo '{nid}' no existe")
+
+    # Combinaciones → Casos de carga
+    for combo in data.get("LoadCombinations",[]):
+        for lid in combo.get("LoadCases",[]):
+            if lid not in all_load_ids:
+                issues.append(f"Combinación '{combo.get('Name','')}' → caso '{lid[:12]}' no existe")
+
+    # Acciones → Casos de carga, Nodos, Barras, Superficies
+    for a in data.get("PointActions",[]):
+        if a.get("LoadCase","") not in all_load_ids:
+            issues.append(f"Acción puntual '{a.get('Name','')}' → caso no existe")
+        rn = a.get("ReferenceNode","")
+        if rn and rn not in node_ids:
+            issues.append(f"Acción puntual '{a.get('Name','')}' → nodo '{rn}' no existe")
+
+    for a in data.get("CurveActions",[]):
+        if a.get("LoadCase","") not in all_load_ids:
+            issues.append(f"Acción lineal '{a.get('Name','')}' → caso no existe")
+        cm = a.get("CurveMember","")
+        if cm and cm not in bar_ids:
+            issues.append(f"Acción lineal '{a.get('Name','')}' → barra '{cm}' no existe")
+
+    for a in data.get("SurfaceActions",[]):
+        if a.get("LoadCase","") not in all_load_ids:
+            issues.append(f"Acción superficial '{a.get('Name','')}' → caso no existe")
+        se = a.get("SurfaceElement","")
+        if se and se not in surf_ids:
+            issues.append(f"Acción superficial '{a.get('Name','')}' → superficie '{se}' no existe")
+
+    # Results1D → Barras y Casos
+    for r in data.get("Results1D",[]):
+        if r.get("Member","") not in bar_ids:
+            issues.append(f"Result1D '{r.get('Name','')}' → barra '{r.get('Member','')}' no existe")
+        if r.get("Load","") not in all_load_ids:
+            issues.append(f"Result1D '{r.get('Name','')}' → caso '{r.get('Load','')[:12]}' no existe")
+
+    # MeshResults → Superficies y Casos
+    for r in data.get("MeshResults",[]):
+        if r.get("Member","") not in surf_ids:
+            issues.append(f"MeshResult '{r.get('Name','')}' → superficie '{r.get('Member','')}' no existe")
+        if r.get("Load","") not in all_load_ids:
+            issues.append(f"MeshResult '{r.get('Name','')}' → caso '{r.get('Load','')[:12]}' no existe")
+
+    # Macros → Superficies
+    for m in data.get("Macros",[]):
+        if m.get("Surface","") not in surf_ids:
+            issues.append(f"Macro '{m.get('Name','')}' → superficie '{m.get('Surface','')}' no existe")
+
+    # ── ADVERTENCIAS ──
+    # Resultados vacíos
     z1 = sum(1 for r in data.get("Results1D",[]) if nz_ratio_1d(r)==0)
     zm = sum(1 for r in data.get("MeshResults",[]) if nz_ratio_mesh(r)==0)
     if z1: warns.append(f"Results1D: {z1}/{len(data.get('Results1D',[]))} vacíos")
     if zm: warns.append(f"MeshResults: {zm}/{len(data.get('MeshResults',[]))} vacíos")
+
+    # Entidades vacías
     empty = [k for k, v in data.items() if isinstance(v, list) and len(v) == 0]
     if empty: warns.append(f"Entidades vacías: {', '.join(empty)}")
-    if not issues and not warns: st.success("✅ Sin problemas.")
+
+    # Superficies sin material
+    no_mat = sum(1 for s in data.get("SurfaceMembers",[]) if not s.get("Materials"))
+    if no_mat: warns.append(f"{no_mat} superficies sin material asignado")
+
+    # Superficies sin región
+    reg_surfs = set(r.get("Surface","") for r in data.get("SurfaceMemberRegions",[]))
+    no_reg = [s.get("Id") for s in data.get("SurfaceMembers",[]) if s.get("Id") not in reg_surfs]
+    if no_reg: warns.append(f"{len(no_reg)} superficies sin región: {', '.join(no_reg[:10])}")
+
+    # Barras sin sección
+    no_cs = sum(1 for b in data.get("CurveMembers",[]) if not b.get("CrossSection"))
+    if no_cs: warns.append(f"{no_cs} barras sin sección asignada")
+
+    # Duplicados
+    dup_surf = [k for k,v in Counter(s.get("Id") for s in data.get("SurfaceMembers",[])).items() if v > 1]
+    if dup_surf: warns.append(f"IDs de superficie duplicados: {', '.join(dup_surf[:10])}")
+    dup_bar = [k for k,v in Counter(b.get("Id") for b in data.get("CurveMembers",[])).items() if v > 1]
+    if dup_bar: warns.append(f"IDs de barra duplicados: {', '.join(dup_bar[:10])}")
+
+    # ── MOSTRAR ──
+    total_checks = len(issues) + len(warns)
+    if not issues and not warns:
+        st.success("✅ Sin problemas. Todas las referencias cruzadas son válidas.")
     if issues:
-        st.error(f"🔴 {len(issues)} errores")
-        for i in issues[:20]: st.markdown(f"- {i}")
+        st.error(f"🔴 {len(issues)} errores de referencia")
+        with st.expander(f"Ver errores ({len(issues)})", expanded=len(issues) <= 20):
+            for i in issues[:50]:
+                st.markdown(f"- {i}")
+            if len(issues) > 50:
+                st.markdown(f"_... y {len(issues)-50} más_")
     if warns:
         st.warning(f"🟡 {len(warns)} advertencias")
-        for w in warns[:20]: st.markdown(f"- {w}")
+        with st.expander(f"Ver advertencias ({len(warns)})"):
+            for w in warns:
+                st.markdown(f"- {w}")
+
+    # Resumen de integridad
+    st.markdown("---")
+    st.markdown("#### 📋 Integridad de Referencias")
+    ref_checks = [
+        ("Secciones → Materiales", len(data.get("CrossSections",[])),
+         sum(1 for cs in data.get("CrossSections",[]) if all(m in mat_ids for m in cs.get("Materials",[])))),
+        ("Barras → Secciones", len(data.get("CurveMembers",[])),
+         sum(1 for b in data.get("CurveMembers",[]) if b.get("CrossSection","") in cs_ids or not b.get("CrossSection"))),
+        ("Barras → Nodos", len(data.get("CurveMembers",[])),
+         sum(1 for b in data.get("CurveMembers",[]) if all(n in node_ids for n in b.get("Nodes",[])))),
+        ("Superficies → Nodos", len(data.get("SurfaceMembers",[])),
+         sum(1 for s in data.get("SurfaceMembers",[]) if all(n in node_ids for n in s.get("Nodes",[])))),
+        ("Superficies → Materiales", len(data.get("SurfaceMembers",[])),
+         sum(1 for s in data.get("SurfaceMembers",[]) if all(m in mat_ids for m in s.get("Materials",[])))),
+        ("Regiones → Superficies", len(data.get("SurfaceMemberRegions",[])),
+         sum(1 for r in data.get("SurfaceMemberRegions",[]) if r.get("Surface","") in surf_ids)),
+        ("Aberturas → Superficies", len(data.get("SurfaceMemberOpenings",[])),
+         sum(1 for o in data.get("SurfaceMemberOpenings",[]) if o.get("Surface","") in surf_ids)),
+        ("Apoyos → Nodos", len(data.get("PointSupports",[])),
+         sum(1 for s in data.get("PointSupports",[]) if s.get("Node","") in node_ids)),
+        ("Acciones → Casos", len(data.get("PointActions",[]))+len(data.get("CurveActions",[]))+len(data.get("SurfaceActions",[])),
+         sum(1 for a in data.get("PointActions",[]) if a.get("LoadCase","") in all_load_ids) +
+         sum(1 for a in data.get("CurveActions",[]) if a.get("LoadCase","") in all_load_ids) +
+         sum(1 for a in data.get("SurfaceActions",[]) if a.get("LoadCase","") in all_load_ids)),
+    ]
+    rows = []
+    for name, total, ok in ref_checks:
+        if total == 0:
+            status = "⬜"
+            pct = "—"
+        elif ok == total:
+            status = "✅"
+            pct = "100%"
+        else:
+            status = "❌"
+            pct = f"{ok}/{total} ({100*ok//total}%)"
+        rows.append({"Referencia": name, "Estado": status, "Válidas": pct})
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
 
 def render_raw_json(data):
     st.markdown('<p class="section-header">🔍 JSON</p>', unsafe_allow_html=True)
