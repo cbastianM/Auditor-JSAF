@@ -477,17 +477,15 @@ def render_bars(data):
         rows=[]
         for b in bars:
             lcs=compute_bar_lcs(b, nm)
-            st,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
+            lcs_status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
             rows.append({"ID":b.get("Id",""),"Nombre":b.get("Name",""),
                 "Tipo":CURVE_TYPE.get(b.get("Type",0),"?"),
                 "Seccion":csm.get(b.get("CrossSection",""),"N/A"),
                 "LCS Tipo":CURVE_LCS_TYPE.get(b.get("LCS"),"—") if b.get("LCS") is not None else "—",
                 "Vector":fmt_vec(b) if has_lcs_vector(b) else "—",
-                "LCS":_status_icon(st),
+                "LCS":_status_icon(lcs_status),
                 "Angulo (deg)":f"{angle:.2f}" if angle is not None else "—"})
-        st2=pd.DataFrame(rows)
-        st2.to_csv("/tmp/bars_df.csv",index=False)
-        st.dataframe(pd.read_csv("/tmp/bars_df.csv"), use_container_width=True, hide_index=True, height=300)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
 
     bars_vec=[b for b in bars if has_lcs_vector(b)]
     if bars_vec:
