@@ -196,117 +196,70 @@ def point_in_polygon_2d(px,py,polygon):
 
 
 # ─────────────────────────────────────────────────
-# TRAZAS LCS EN 3D — ejes X/Y/Z calculados con etiquetas
+# TRAZAS LCS EN 3D — solo OK/Error por elemento
 # ─────────────────────────────────────────────────
-def _draw_axis(fig, origin, direction, scale, color, width, label_text, hover_text, group):
-    """Dibuja una línea de eje con etiqueta en la punta."""
-    tip=(origin[0]+direction[0]*scale, origin[1]+direction[1]*scale, origin[2]+direction[2]*scale)
-    # Línea del eje
-    fig.add_trace(go.Scatter3d(
-        x=[origin[0],tip[0]], y=[origin[1],tip[1]], z=[origin[2],tip[2]],
-        mode="lines", line=dict(color=color, width=width),
-        hovertemplate=hover_text+"<extra></extra>",
-        legendgroup=group, showlegend=False))
-    # Etiqueta en la punta
-    fig.add_trace(go.Scatter3d(
-        x=[tip[0]], y=[tip[1]], z=[tip[2]],
-        mode="text", text=[label_text],
-        textfont=dict(color=color, size=11),
-        hovertemplate=hover_text+"<extra></extra>",
-        legendgroup=group, showlegend=False))
-
-
-def _draw_lcs_element(fig, o, lcs, status, angle, name, is_checked_fn, group_prefix):
-    """Dibuja los 3 ejes locales de un elemento con color y grosor según estado."""
-    axis_defs = [
-        ("x", "#e94560", "X"),
-        ("y", "#51cf66", "Y"),
-        ("z", "#4a9eff", "Z"),
-    ]
-    for axis_key, base_color, axis_label in axis_defs:
-        v = lcs[axis_key]
-        is_checked = is_checked_fn(axis_label)
-
-        if is_checked:
-            if status == "ok":
-                color = base_color
-                width = 6
-                tip_label = f"{axis_label} ✓"
-                hover = f"{name} | eje {axis_label} verificado ✅ | error: {angle:.1f}°"
-            elif status == "error":
-                color = LCS_BAD_COLOR
-                width = 8
-                tip_label = f"{axis_label} ✗"
-                hover = f"{name} | eje {axis_label} verificado ❌ | error: {angle:.1f}°"
-            else:
-                color = LCS_NONE_COLOR
-                width = 4
-                tip_label = axis_label
-                hover = f"{name} | eje {axis_label} (default)"
-        else:
-            color = base_color
-            width = 3
-            tip_label = axis_label
-            hover = f"{name} | eje {axis_label} local"
-
-        _draw_axis(fig, o, v, lcs["_scale"], color, width, tip_label, hover, group_prefix)
-
-    # Punto de origen: grande y con símbolo
-    pt_color = LCS_OK_COLOR if status=="ok" else (LCS_BAD_COLOR if status=="error" else LCS_NONE_COLOR)
-    pt_size  = 10 if status in ("ok","error") else 6
-    icon     = "✅" if status=="ok" else ("❌" if status=="error" else "○")
-    angle_str = f" | {angle:.1f}°" if angle is not None else ""
-    fig.add_trace(go.Scatter3d(
-        x=[o[0]], y=[o[1]], z=[o[2]],
-        mode="markers+text",
-        marker=dict(size=pt_size, color=pt_color, symbol="circle",
-                    line=dict(color="white", width=1)),
-        text=[icon], textposition="top center",
-        textfont=dict(size=10, color=pt_color),
-        hovertemplate=f"{icon} {name}{angle_str}<extra></extra>",
-        legendgroup=group_prefix+"_pt", showlegend=False))
-
-
 def add_lcs_traces_surfaces(fig, data, nm, scale):
-    for surf in data.get("SurfaceMembers",[]):
+    for surf in data.get("SurfaceMembers", []):
         lcs = compute_surface_lcs(surf, nm)
-        if not lcs: continue
-        lcs["_scale"] = scale
-        status, angle = check_surface_lcs(surf, lcs)
-        lcs_type = surf.get("LCS", 0) or 0
-
-        def is_checked_surf(axis_label):
-            return (axis_label=="X" and lcs_type==1) or (axis_label=="Y" and lcs_type==2)
-
-        _draw_lcs_element(fig, lcs["origin"], lcs, status, angle,
-                          surf.get("Name",""), is_checked_surf, "lcs_surf")
+        if not lcs:
+            continue
+        o = lcs["origin"]
+        name = surf.get("Name", "")
+        if not has_lcs_vector(surf):
+            color = LCS_BAD_COLOR
+            hover = f"<b>{name}</b><br>❌ Sin vector LCS definido<extra></extra>"
+        else:
+            status, angle = check_surface_lcs(surf, lcs)
+            lcs_type = surf.get("LCS", 0) or 0
+            eje = "X" if lcs_type == 1 else ("Y" if lcs_type == 2 else "—")
+            if status == "ok":
+                color = LCS_OK_COLOR
+                hover = f"<b>{name}</b><br>✅ OK | eje {eje} | {angle:.1f} deg<extra></extra>"
+            else:
+                color = LCS_BAD_COLOR
+                hover = f"<b>{name}</b><br>❌ Error | eje {eje} | {angle:.1f} deg<extra></extra>"
+        fig.add_trace(go.Scatter3d(
+            x=[o[0]], y=[o[1]], z=[o[2]],
+            mode="markers",
+            marker=dict(size=12, color=color, symbol="circle",
+                        line=dict(color="white", width=1.5)),
+            hovertemplate=hover,
+            legendgroup="lcs_result", showlegend=False))
 
 
 def add_lcs_traces_bars(fig, data, nm, scale):
-    for bar in data.get("CurveMembers",[]):
+    for bar in data.get("CurveMembers", []):
         lcs = compute_bar_lcs(bar, nm)
-        if not lcs: continue
-        lcs["_scale"] = scale
-        status, angle = check_bar_lcs(bar, lcs)
-        lcs_type = bar.get("LCS")
+        if not lcs:
+            continue
+        o = lcs["origin"]
+        name = bar.get("Name", "")
+        if not has_lcs_vector(bar):
+            color = LCS_BAD_COLOR
+            hover = f"<b>{name}</b><br>❌ Sin vector LCS definido<extra></extra>"
+        else:
+            status, angle = check_bar_lcs(bar, lcs)
+            lcs_type = bar.get("LCS")
+            eje = "Y" if lcs_type in (0, 2) else ("Z" if lcs_type in (1, 3) else "—")
+            if status == "ok":
+                color = LCS_OK_COLOR
+                hover = f"<b>{name}</b><br>✅ OK | eje {eje} | {angle:.1f} deg<extra></extra>"
+            else:
+                color = LCS_BAD_COLOR
+                hover = f"<b>{name}</b><br>❌ Error | eje {eje} | {angle:.1f} deg<extra></extra>"
+        fig.add_trace(go.Scatter3d(
+            x=[o[0]], y=[o[1]], z=[o[2]],
+            mode="markers",
+            marker=dict(size=10, color=color, symbol="diamond",
+                        line=dict(color="white", width=1.5)),
+            hovertemplate=hover,
+            legendgroup="lcs_result", showlegend=False))
 
-        def is_checked_bar(axis_label, lt=lcs_type):
-            return (axis_label=="Y" and lt in (0,2)) or (axis_label=="Z" and lt in (1,3))
-
-        _draw_lcs_element(fig, lcs["origin"], lcs, status, angle,
-                          bar.get("Name",""), is_checked_bar, "lcs_bar")
-
-    # Entradas de leyenda con líneas de ejemplo
-    for color, lbl, w in [(LCS_OK_COLOR,"Eje verificado ✅ OK",6),
-                           (LCS_BAD_COLOR,"Eje verificado ❌ Error",8),
-                           (LCS_NONE_COLOR,"LCS 🔵 Default",4),
-                           ("#e94560","Eje X local",3),
-                           ("#51cf66","Eje Y local",3),
-                           ("#4a9eff","Eje Z local",3)]:
-        fig.add_trace(go.Scatter3d(x=[None],y=[None],z=[None],mode="lines",
-            line=dict(color=color,width=w), name=lbl))
-
-
+    # Leyenda
+    fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode="markers",
+        marker=dict(size=10, color=LCS_OK_COLOR), name="LCS ✅ Correcto"))
+    fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode="markers",
+        marker=dict(size=10, color=LCS_BAD_COLOR), name="LCS ❌ Incorrecto / Sin definir"))
 # ─────────────────────────────────────────────────
 # RESUMEN
 # ─────────────────────────────────────────────────
