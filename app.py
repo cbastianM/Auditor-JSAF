@@ -1001,7 +1001,11 @@ def render_raw_json(data):
     sk=st.selectbox("Entidad",keys)
     items=data.get(sk,[])
     if items:
-        idx=st.slider("Indice",0,len(items)-1,0)
+        if len(items)>1:
+            idx=st.slider("Indice",0,len(items)-1,0)
+        else:
+            idx=0
+            st.caption("1 elemento")
         st.json(items[idx])
 
 
