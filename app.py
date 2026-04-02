@@ -1001,12 +1001,30 @@ def render_raw_json(data):
     keys=[k for k in data.keys() if isinstance(data[k],list)]
     sk=st.selectbox("Entidad",keys)
     items=data.get(sk,[])
-    if items:
+    if not items:
+        st.info("Sin elementos.")
+        return
+
+    # Búsqueda por nombre o ID
+    query=st.text_input("Buscar por nombre o ID", placeholder="Ej: Panel1, Bar3, ...").strip().lower()
+
+    if query:
+        filtered=[(i,it) for i,it in enumerate(items)
+                  if query in str(it.get("Name","")).lower()
+                  or query in str(it.get("Id","")).lower()]
+        if not filtered:
+            st.warning(f"Sin resultados para '{query}'.")
+            return
+        st.caption(f"{len(filtered)} resultado(s) de {len(items)}")
+        for i,it in filtered:
+            with st.expander(f"[{i}] {it.get('Name', it.get('Id', '?'))}"):
+                st.json(it)
+    else:
+        st.caption(f"{len(items)} elementos — usa el buscador o navega con el slider")
         if len(items)>1:
-            idx=st.slider("Indice",0,len(items)-1,0)
+            idx=st.slider("Índice",0,len(items)-1,0)
         else:
             idx=0
-            st.caption("1 elemento")
         st.json(items[idx])
 
 
