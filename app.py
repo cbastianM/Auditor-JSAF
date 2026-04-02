@@ -450,11 +450,45 @@ def render_3d_model(data):
         add_lcs_traces_bars(fig, data, nm, lcs_scale_bar)
 
     ng=dict(showgrid=False,showline=False,zeroline=False,showbackground=False)
-    fig.update_layout(scene=dict(xaxis=dict(title="X (m)",**ng),yaxis=dict(title="Y (m)",**ng),
-                                  zaxis=dict(title="Z (m)",**ng),aspectmode='data',bgcolor='rgba(0,0,0,0)'),
-        margin=dict(l=0,r=0,t=30,b=0),height=650,template="plotly_dark",
-        legend=dict(orientation="h",y=1.02,x=0.5,xanchor="center"))
+    fig.update_layout(
+        scene=dict(xaxis=dict(title="X (m)",**ng),yaxis=dict(title="Y (m)",**ng),
+                   zaxis=dict(title="Z (m)",**ng),aspectmode='data',bgcolor='rgba(0,0,0,0)'),
+        margin=dict(l=0,r=160,t=30,b=0),height=650,template="plotly_dark",
+        legend=dict(
+            orientation="v",x=1.01,y=0.5,xanchor="left",yanchor="middle",
+            bgcolor="rgba(20,20,40,0.85)",bordercolor="#0f3460",borderwidth=1,
+            font=dict(size=11)))
     st.plotly_chart(fig, use_container_width=True)
+
+    if show_lcs:
+        nm_local={n.get("Id"):n for n in data.get("PointConnections",[])}
+        err_rows=[]
+        for s in data.get("SurfaceMembers",[]):
+            if has_lcs_vector(s):
+                lcs=compute_surface_lcs(s,nm_local)
+                status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
+                if status=="error":
+                    err_rows.append({"Tipo":"Superficie","Nombre":s.get("Name",""),
+                        "LCS enum":s.get("LCS",0),
+                        "Eje verificado":"X" if s.get("LCS")==1 else "Y",
+                        "Vector JSON":fmt_vec(s),
+                        "Angulo error (deg)":f"{angle:.2f}"})
+        for b in data.get("CurveMembers",[]):
+            if has_lcs_vector(b):
+                lcs=compute_bar_lcs(b,nm_local)
+                status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
+                if status=="error":
+                    lcs_type=b.get("LCS")
+                    err_rows.append({"Tipo":"Barra","Nombre":b.get("Name",""),
+                        "LCS enum":lcs_type,
+                        "Eje verificado":"Y" if lcs_type in (0,2) else "Z",
+                        "Vector JSON":fmt_vec(b),
+                        "Angulo error (deg)":f"{angle:.2f}"})
+        if err_rows:
+            st.markdown(f"#### ❌ Elementos con LCS incorrecto ({len(err_rows)})")
+            st.dataframe(pd.DataFrame(err_rows),use_container_width=True,hide_index=True)
+        elif any(has_lcs_vector(s) for s in data.get("SurfaceMembers",[])) or              any(has_lcs_vector(b) for b in data.get("CurveMembers",[])):
+            st.success("✅ Todos los LCS con vector definido estan correctamente alineados.")
 
 
 # ─────────────────────────────────────────────────
