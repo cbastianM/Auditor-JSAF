@@ -464,32 +464,48 @@ def render_3d_model(data):
     if show_lcs:
         nm_local={n.get("Id"):n for n in data.get("PointConnections",[])}
         err_rows=[]
+        ok_count=0
         for s in data.get("SurfaceMembers",[]):
-            if has_lcs_vector(s):
-                lcs=compute_surface_lcs(s,nm_local)
-                status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
+            lcs=compute_surface_lcs(s,nm_local)
+            if not lcs:
+                continue
+            if not has_lcs_vector(s):
+                err_rows.append({"Tipo":"Superficie","Nombre":s.get("Name",""),
+                    "Problema":"Sin vector LCS definido","Angulo error (deg)":"—"})
+            else:
+                status,angle=check_surface_lcs(s,lcs)
                 if status=="error":
                     err_rows.append({"Tipo":"Superficie","Nombre":s.get("Name",""),
-                        "LCS enum":s.get("LCS",0),
-                        "Eje verificado":"X" if s.get("LCS")==1 else "Y",
-                        "Vector JSON":fmt_vec(s),
+                        "Problema":f"Eje {'X' if s.get('LCS')==1 else 'Y'} mal alineado",
                         "Angulo error (deg)":f"{angle:.2f}"})
+                else:
+                    ok_count+=1
         for b in data.get("CurveMembers",[]):
-            if has_lcs_vector(b):
-                lcs=compute_bar_lcs(b,nm_local)
-                status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
+            lcs=compute_bar_lcs(b,nm_local)
+            if not lcs:
+                continue
+            if not has_lcs_vector(b):
+                err_rows.append({"Tipo":"Barra","Nombre":b.get("Name",""),
+                    "Problema":"Sin vector LCS definido","Angulo error (deg)":"—"})
+            else:
+                status,angle=check_bar_lcs(b,lcs)
                 if status=="error":
                     lcs_type=b.get("LCS")
                     err_rows.append({"Tipo":"Barra","Nombre":b.get("Name",""),
-                        "LCS enum":lcs_type,
-                        "Eje verificado":"Y" if lcs_type in (0,2) else "Z",
-                        "Vector JSON":fmt_vec(b),
+                        "Problema":f"Eje {'Y' if lcs_type in (0,2) else 'Z'} mal alineado",
                         "Angulo error (deg)":f"{angle:.2f}"})
+                else:
+                    ok_count+=1
+        total=ok_count+len(err_rows)
+        c1,c2,c3=st.columns(3)
+        c1.metric("Total elementos",total)
+        c2.metric("✅ Correctos",ok_count)
+        c3.metric("❌ Incorrectos",len(err_rows))
         if err_rows:
-            st.markdown(f"#### ❌ Elementos con LCS incorrecto ({len(err_rows)})")
+            st.markdown(f"#### ❌ Elementos incorrectos ({len(err_rows)})")
             st.dataframe(pd.DataFrame(err_rows),use_container_width=True,hide_index=True)
-        elif any(has_lcs_vector(s) for s in data.get("SurfaceMembers",[])) or              any(has_lcs_vector(b) for b in data.get("CurveMembers",[])):
-            st.success("✅ Todos los LCS con vector definido estan correctamente alineados.")
+        else:
+            st.success("✅ Todos los elementos tienen LCS correctamente definido.")
 
 
 # ─────────────────────────────────────────────────
