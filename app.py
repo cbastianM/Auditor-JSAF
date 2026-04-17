@@ -171,8 +171,16 @@ def _status_label(status): return {"ok":"✅ OK","error":"❌ Error","default":"
 def load_json(file): return json.load(file)
 def mc(value,label): return f'<div class="metric-card"><h3>{value}</h3><p>{label}</p></div>'
 def id_name_map(items): return {it.get("Id",""): it.get("Name",it.get("Id","?")) for it in (items or [])}
-def nz_ratio_1d(r): return sum(1 for c in COMPS_1D if any(abs(v)>1e-6 for v in r.get(c,[])))/len(COMPS_1D)
-def nz_ratio_mesh(r): return sum(1 for c in COMPS_MESH if any(abs(v)>1e-6 for v in r.get(c,[])))/len(COMPS_MESH)
+def nz_ratio_1d(r): 
+    """Calcula la proporción de componentes con valores significativos en resultados 1D.
+    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
+    return sum(1 for c in COMPS_1D if any(abs(v)>1e-9 for v in r.get(c,[])))/len(COMPS_1D)
+
+def nz_ratio_mesh(r): 
+    """Calcula la proporción de componentes con valores significativos en resultados mesh.
+    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
+    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in r.get(c,[])))/len(COMPS_MESH)
+
 def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["LCSX","LCSY","LCSZ"])
 def fmt_vec(obj): return f"({obj.get('LCSX',0) or 0:.3f}, {obj.get('LCSY',0) or 0:.3f}, {obj.get('LCSZ',0) or 0:.3f})"
 def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
@@ -746,7 +754,7 @@ def render_results_1d(data):
     secs=r.get("SectionsAt",[])
     comps={"N (kN)":r.get("aN",[]),"Vy (kN)":r.get("aVy",[]),"Vz (kN)":r.get("aVz",[]),
            "Mx (kNm)":r.get("aMx",[]),"My (kNm)":r.get("aMy",[]),"Mz (kNm)":r.get("aMz",[])}
-    nz_comps=[n for n,v in comps.items() if any(abs(x)>1e-6 for x in v)]
+    nz_comps=[n for n,v in comps.items() if any(abs(x)>1e-9 for x in v)]
     defaults=[c for c in ["Vz (kN)","My (kNm)"] if c in nz_comps] or nz_comps[:2]
     sel_comps=st.multiselect("Componentes:",list(comps.keys()),default=defaults,key="mc1d")
     if sel_comps and secs:
@@ -812,7 +820,7 @@ def render_mesh_results(data):
         rot=s.get("LCSRotation"); r_str=f" | Rot: {rot:.2f} deg" if rot is not None else ""
         st.info(f"🧭 LCS Panel {sel_panel}: {_status_label(status)}{a_str} | Vector: {fmt_vec(s)}{r_str}")
     comps={c:r.get(c,[]) for c in COMPS_MESH if r.get(c)}
-    nz_comps={k:v for k,v in comps.items() if any(abs(x)>1e-6 for x in v)}
+    nz_comps={k:v for k,v in comps.items() if any(abs(x)>1e-9 for x in v)}
     comp_list=list(nz_comps.keys()) if nz_comps else list(comps.keys())
     if not comp_list: return st.info("Sin componentes con valores.")
     sel=st.selectbox("Componente:",comp_list,key="sel_comp_m")
