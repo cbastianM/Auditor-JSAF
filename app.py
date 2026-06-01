@@ -179,7 +179,7 @@ def nz_ratio_1d(r):
 def nz_ratio_mesh(r): 
     """Calcula la proporción de componentes con valores significativos en resultados mesh.
     Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
-    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in (r.get(c) or [])))/len(COMPS_MESH)
+    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in (r.get(c) if isinstance(r.get(c), list) else [])))/len(COMPS_MESH)
 
 def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["LCSX","LCSY","LCSZ"])
 def fmt_vec(obj): return f"({obj.get('LCSX',0) or 0:.3f}, {obj.get('LCSY',0) or 0:.3f}, {obj.get('LCSZ',0) or 0:.3f})"
@@ -781,7 +781,7 @@ def render_mesh_results(data):
         if ratio>0: panel_summary[pid]["nz"]+=1
         else: panel_summary[pid]["z"]+=1
         for c in COMPS_MESH:
-            vals=[abs(v) for v in (r.get(c) or [])]; 
+            vals=[abs(v) for v in (r.get(c) if isinstance(r.get(c), list) else [])]; 
             if vals: panel_summary[pid]["max"][c]=max(panel_summary[pid]["max"][c],max(vals))
     total=len(results); full=sum(1 for r in results if nz_ratio_mesh(r)==1.0)
     partial=sum(1 for r in results if 0<nz_ratio_mesh(r)<1.0); empty=sum(1 for r in results if nz_ratio_mesh(r)==0)
@@ -794,6 +794,7 @@ def render_mesh_results(data):
         s=surf_obj_map.get(pid,{}); lcs=compute_surface_lcs(s,nm) if s else None
         status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
         rows.append({"Panel":f"Panel {pid}","panel_id":pid,
+            "Tipo":SURFACE_TYPE.get(s.get("Type",0),"?"),
             "Estado":"OK" if info["nz"]>0 else "vacio",
             "|mx|":f"{mv['amx']:.2f}","|my|":f"{mv['amy']:.2f}",
             "|nx|":f"{mv['anx']:.2f}","|ny|":f"{mv['any']:.2f}",
@@ -804,6 +805,10 @@ def render_mesh_results(data):
     if filt=="Con valores": df=df[df["Estado"]=="OK"]
     elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
     st.dataframe(df.drop(columns=["panel_id"]),use_container_width=True,hide_index=True,height=280)
+    # Mostrar conteo por tipo de superficie
+    if "Tipo" in df.columns:
+        tc=df["Tipo"].value_counts()
+        st.caption(f"Distribución por tipo: {', '.join(f'{k}={v}' for k,v in tc.items())}")
     st.markdown("---"); st.markdown("#### Diagrama detallado")
     panel_ids=df["panel_id"].tolist()
     if not panel_ids: return
@@ -819,7 +824,7 @@ def render_mesh_results(data):
         a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
         rot=s.get("LCSRotation"); r_str=f" | Rot: {rot:.2f} deg" if rot is not None else ""
         st.info(f"🧭 LCS Panel {sel_panel}: {_status_label(status)}{a_str} | Vector: {fmt_vec(s)}{r_str}")
-    comps={c:(r.get(c) or []) for c in COMPS_MESH if r.get(c)}
+    comps={c:(r.get(c) if isinstance(r.get(c), list) else []) for c in COMPS_MESH if r.get(c)}
     nz_comps={k:v for k,v in comps.items() if any(abs(x)>1e-9 for x in v)}
     comp_list=list(nz_comps.keys()) if nz_comps else list(comps.keys())
     if not comp_list: return st.info("Sin componentes con valores.")
