@@ -179,7 +179,7 @@ def nz_ratio_1d(r):
 def nz_ratio_mesh(r): 
     """Calcula la proporción de componentes con valores significativos en resultados mesh.
     Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
-    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in r.get(c,[])))/len(COMPS_MESH)
+    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in (r.get(c) or [])))/len(COMPS_MESH)
 
 def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["LCSX","LCSY","LCSZ"])
 def fmt_vec(obj): return f"({obj.get('LCSX',0) or 0:.3f}, {obj.get('LCSY',0) or 0:.3f}, {obj.get('LCSZ',0) or 0:.3f})"
@@ -715,7 +715,7 @@ def render_results_1d(data):
         if ratio>0: bar_summary[bid]["nz"]+=1
         else: bar_summary[bid]["z"]+=1
         for c in COMPS_1D:
-            vals=[abs(v) for v in r.get(c,[])]
+            vals=[abs(v) for v in (r.get(c) or [])]
             if vals: bar_summary[bid]["max"][c]=max(bar_summary[bid]["max"][c],max(vals))
     total=len(results); full=sum(1 for r in results if nz_ratio_1d(r)==1.0)
     partial=sum(1 for r in results if 0<nz_ratio_1d(r)<1.0); empty=sum(1 for r in results if nz_ratio_1d(r)==0)
@@ -781,7 +781,7 @@ def render_mesh_results(data):
         if ratio>0: panel_summary[pid]["nz"]+=1
         else: panel_summary[pid]["z"]+=1
         for c in COMPS_MESH:
-            vals=[abs(v) for v in r.get(c,[])]; 
+            vals=[abs(v) for v in (r.get(c) or [])]; 
             if vals: panel_summary[pid]["max"][c]=max(panel_summary[pid]["max"][c],max(vals))
     total=len(results); full=sum(1 for r in results if nz_ratio_mesh(r)==1.0)
     partial=sum(1 for r in results if 0<nz_ratio_mesh(r)<1.0); empty=sum(1 for r in results if nz_ratio_mesh(r)==0)
@@ -819,7 +819,7 @@ def render_mesh_results(data):
         a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
         rot=s.get("LCSRotation"); r_str=f" | Rot: {rot:.2f} deg" if rot is not None else ""
         st.info(f"🧭 LCS Panel {sel_panel}: {_status_label(status)}{a_str} | Vector: {fmt_vec(s)}{r_str}")
-    comps={c:r.get(c,[]) for c in COMPS_MESH if r.get(c)}
+    comps={c:(r.get(c) or []) for c in COMPS_MESH if r.get(c)}
     nz_comps={k:v for k,v in comps.items() if any(abs(x)>1e-9 for x in v)}
     comp_list=list(nz_comps.keys()) if nz_comps else list(comps.keys())
     if not comp_list: return st.info("Sin componentes con valores.")
