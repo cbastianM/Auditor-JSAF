@@ -244,12 +244,20 @@ def is_non_planar(s):
 
 def project_to_2d(points_3d):
     if len(points_3d)<3: return [(p[0],p[1]) for p in points_3d]
-    p0,p1,p2=points_3d[0],points_3d[1],points_3d[2]
-    v1=(p1[0]-p0[0],p1[1]-p0[1],p1[2]-p0[2]); v2=(p2[0]-p0[0],p2[1]-p0[1],p2[2]-p0[2])
-    nx=abs(v1[1]*v2[2]-v1[2]*v2[1]); ny=abs(v1[2]*v2[0]-v1[0]*v2[2]); nz=abs(v1[0]*v2[1]-v1[1]*v2[0])
-    if nz>=nx and nz>=ny: return [(p[0],p[1]) for p in points_3d]
-    elif ny>=nx:           return [(p[0],p[2]) for p in points_3d]
-    else:                  return [(p[1],p[2]) for p in points_3d]
+    # Normal robusta (metodo de Newell): usa TODOS los vertices, no solo los 3
+    # primeros. Evita el fallo cuando los primeros nodos son colineales (tipico en
+    # muros/superficies con varios nodos sobre un mismo borde recto), que con el
+    # metodo antiguo aplastaba el poligono a una linea y dejaba la cara sin triangular.
+    n=len(points_3d); nx=ny=nz=0.0
+    for i in range(n):
+        cur=points_3d[i]; nxt=points_3d[(i+1)%n]
+        nx+=(cur[1]-nxt[1])*(cur[2]+nxt[2])
+        ny+=(cur[2]-nxt[2])*(cur[0]+nxt[0])
+        nz+=(cur[0]-nxt[0])*(cur[1]+nxt[1])
+    ax,ay,az=abs(nx),abs(ny),abs(nz)
+    if az>=ax and az>=ay: return [(p[0],p[1]) for p in points_3d]   # plano dominante XY
+    elif ay>=ax:          return [(p[0],p[2]) for p in points_3d]   # plano dominante XZ
+    else:                 return [(p[1],p[2]) for p in points_3d]   # plano dominante YZ
 
 def point_in_polygon_2d(px,py,polygon):
     n=len(polygon); inside=False; j=n-1
@@ -483,18 +491,31 @@ def render_3d_model(data):
                     (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op2d) for op2d in ops2d)]
             return tris
 
-        # Ahora se incluyen TODOS los tipos estructurales (antes solo 0 y 1 → shells y
-        # ribbed slabs no se dibujaban).
-        surf_styles=[
-            (0,"Losas",        "rgba(100,180,255,0.55)","rgba(100,180,255,0.85)"),
-            (1,"Muros",        "rgba(255,160,80,0.55)", "rgba(255,160,80,0.85)"),
-            (2,"Shells",       "rgba(150,230,160,0.55)","rgba(150,230,160,0.85)"),
-            (3,"Ribbed Slab",  "rgba(255,215,100,0.50)","rgba(255,215,100,0.85)"),
-        ]
-        for stype,label,color,ecolor in surf_styles:
+        # Render robusto: agrupa por el valor REAL de "Type" de cada superficie.
+        # Antes se filtraba contra una lista fija {0,1,2,3}; cualquier superficie con
+        # otro Type (p. ej. muros cuyo Type no es 1) quedaba sin dibujar en silencio.
+        TYPE_COLORS={
+            0:("rgba(100,180,255,0.55)","rgba(100,180,255,0.85)"),
+            1:("rgba(255,160,80,0.55)", "rgba(255,160,80,0.85)"),
+            2:("rgba(150,230,160,0.55)","rgba(150,230,160,0.85)"),
+            3:("rgba(255,215,100,0.50)","rgba(255,215,100,0.85)"),
+        }
+        FALLBACK_COLORS=[("rgba(204,93,232,0.50)","rgba(204,93,232,0.85)"),
+                         ("rgba(120,143,252,0.50)","rgba(120,143,252,0.85)"),
+                         ("rgba(255,107,107,0.50)","rgba(255,107,107,0.85)"),
+                         ("rgba(81,207,102,0.50)", "rgba(81,207,102,0.85)")]
+        groups={}
+        for surf in data.get("SurfaceMembers",[]):
+            groups.setdefault(surf.get("Type",0),[]).append(surf)
+        fb=0
+        for tval in sorted(groups.keys(), key=lambda x:(x is None, str(x))):
+            label=SURFACE_TYPE.get(tval, f"Superficie (Type {tval})")
+            if tval in TYPE_COLORS:
+                color,ecolor=TYPE_COLORS[tval]
+            else:
+                color,ecolor=FALLBACK_COLORS[fb%len(FALLBACK_COLORS)]; fb+=1
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
-            for surf in data.get("SurfaceMembers",[]):
-                if surf.get("Type",0)!=stype: continue
+            for surf in groups[tval]:
                 sid=surf.get("Id","")
                 pts=[nm.get(nid) for nid in surf.get("Nodes",[])]
                 pts=[p for p in pts if p]
