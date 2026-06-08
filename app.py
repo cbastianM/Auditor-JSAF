@@ -33,10 +33,6 @@ CS_SHAPE       = {0:"Circle",1:"Rectangle",6:"I Section",9:"T Section",14:"U Sec
 CS_TYPE        = {0:"Parametric",1:"Manufactured",2:"Compound",3:"General"}
 CURVE_TYPE     = {0:"General",1:"Beam",2:"Column",10:"SlabRib"}
 SURFACE_TYPE   = {0:"Plate",1:"Wall",2:"Shell",3:"Ribbed Slab"}
-# Geometry Type (RFEM) — orden tomado del desplegable. Mapeo entero asumido 0..6.
-GEOMETRY_TYPE  = {0:"Plane",1:"Quadrangle",2:"NURBS",3:"Trimmed",4:"Rotated",5:"Pipe",6:"Minimum Curvature Spline"}
-# Geometrías que NO son planas: la triangulación por nodos de borde es solo aproximada.
-NON_PLANAR_GEOM = {1,2,4,5,6}
 SUPPORT_TRANS  = {0:"Free",1:"Rigid",2:"Flexible",3:"Comp. Only",4:"Tension Only"}
 SUPPORT_ROT    = {0:"Free",1:"Rigid",2:"Flexible"}
 ACTION_TYPE_LC = {0:"Permanent",1:"Variable",2:"Accidental"}
@@ -48,50 +44,13 @@ PLOT_COLORS    = ["#e94560","#4a9eff","#51cf66","#ffd43b","#cc5de8","#ff922b"]
 SURFACE_LCS_TYPE = {0:"Default",1:"Eje X local = vector",2:"Eje Y local = vector"}
 CURVE_LCS_TYPE   = {0:"Eje Y = dir. vector",1:"Eje Z = dir. vector",2:"Eje Y apunta al punto",3:"Eje Z apunta al punto"}
 
-COMPS_1D   = ['aN','aVy','aVz','aMx','aMy','aMz']
-COMPS_MESH = ['amx','amy','amxy','avx','avy','anx','any','anxy']
+COMPS_1D   = ['N','Vy','Vz','Mx','My','Mz']
+COMPS_MESH = ['Mx','My','Mxy','Vx','Vy','Nx','Ny','Nxy']
 
 LCS_OK_COLOR   = "#51cf66"
 LCS_BAD_COLOR  = "#e94560"
 LCS_NONE_COLOR = "#748ffc"
 ANGLE_TOL_DEG  = 5.0
-
-
-# ─────────────────────────────────────────────────
-# NORMALIZACION DE VALORES DE RESULTADOS
-# ─────────────────────────────────────────────────
-def _extract_numbers(v):
-    """Aplana un componente de resultado a una lista de floats.
-    Soporta: lista de floats, lista de dicts, dict {nodo: valor}, o None.
-    Es el fix central del TypeError: algunos componentes de MeshResults
-    vienen como listas que contienen dicts en lugar de floats planos."""
-    nums = []
-
-    def push(x):
-        if isinstance(x, bool):
-            return  # bool es subclase de int; lo ignoramos explícitamente
-        if isinstance(x, (int, float)):
-            nums.append(float(x))
-        elif isinstance(x, dict):
-            # Priorizar un campo de valor común si existe
-            for key in ("Value", "value", "Val", "v"):
-                if key in x and isinstance(x[key], (int, float)) and not isinstance(x[key], bool):
-                    nums.append(float(x[key]))
-                    return
-            # Si no, tomar todos los numéricos del dict
-            for val in x.values():
-                if isinstance(val, (int, float)) and not isinstance(val, bool):
-                    nums.append(float(val))
-        elif isinstance(x, (list, tuple)):
-            for item in x:
-                push(item)
-
-    if isinstance(v, (list, tuple)):
-        for item in v:
-            push(item)
-    elif isinstance(v, dict):
-        push(v)
-    return nums
 
 
 # ─────────────────────────────────────────────────
@@ -128,8 +87,8 @@ def compute_surface_lcs(surf, nm):
     p2=(pts[2]["X"],pts[2]["Y"],pts[2]["Z"])
     v01=_sub(p1,p0); v02=_sub(p2,p0)
     z_local=_norm(_cross(v01,v02))
-    lcs_type=surf.get("LCS",0) or 0
-    vx=surf.get("LCSX",0) or 0; vy=surf.get("LCSY",0) or 0; vz=surf.get("LCSZ",0) or 0
+    lcs_type=surf.get("LCSType",0) or 0
+    vx=surf.get("CoordinateX",0) or 0; vy=surf.get("CoordinateY",0) or 0; vz=surf.get("CoordinateZ",0) or 0
     has_vec=_mag((vx,vy,vz))>1e-9
     if lcs_type==1 and has_vec:
         raw=_norm((vx,vy,vz)); d=_dot(raw,z_local)
@@ -157,7 +116,7 @@ def compute_bar_lcs(bar, nm):
     p1=(n1["X"],n1["Y"],n1["Z"]); p2=(n2["X"],n2["Y"],n2["Z"])
     x_local=_norm(_sub(p2,p1))
     lcs_type=bar.get("LCS")
-    vx=bar.get("LCSX",0) or 0; vy=bar.get("LCSY",0) or 0; vz=bar.get("LCSZ",0) or 0
+    vx=bar.get("CoordinateX",0) or 0; vy=bar.get("CoordinateY",0) or 0; vz=bar.get("CoordinateZ",0) or 0
     has_vec=_mag((vx,vy,vz))>1e-9
     if lcs_type in (0,1) and has_vec:
         ref=_norm((vx,vy,vz)); d=_dot(ref,x_local)
@@ -179,8 +138,8 @@ def compute_bar_lcs(bar, nm):
 
 
 def check_surface_lcs(surf, lcs):
-    lcs_type=surf.get("LCS",0) or 0
-    vx=surf.get("LCSX",0) or 0; vy=surf.get("LCSY",0) or 0; vz=surf.get("LCSZ",0) or 0
+    lcs_type=surf.get("LCSType",0) or 0
+    vx=surf.get("CoordinateX",0) or 0; vy=surf.get("CoordinateY",0) or 0; vz=surf.get("CoordinateZ",0) or 0
     if _mag((vx,vy,vz))<1e-9 or lcs_type==0: return "default",None
     ref=_norm((vx,vy,vz))
     target=lcs["x"] if lcs_type==1 else lcs["y"]
@@ -191,7 +150,7 @@ def check_surface_lcs(surf, lcs):
 def check_bar_lcs(bar, lcs):
     lcs_type=bar.get("LCS")
     if lcs_type is None: return "default",None
-    vx=bar.get("LCSX",0) or 0; vy=bar.get("LCSY",0) or 0; vz=bar.get("LCSZ",0) or 0
+    vx=bar.get("CoordinateX",0) or 0; vy=bar.get("CoordinateY",0) or 0; vz=bar.get("CoordinateZ",0) or 0
     if _mag((vx,vy,vz))<1e-9: return "default",None
     if lcs_type in (0,1):
         ref=_norm((vx,vy,vz)); target=lcs["y"] if lcs_type==0 else lcs["z"]
@@ -211,53 +170,66 @@ def _status_label(status): return {"ok":"✅ OK","error":"❌ Error","default":"
 # ─────────────────────────────────────────────────
 def load_json(file): return json.load(file)
 def mc(value,label): return f'<div class="metric-card"><h3>{value}</h3><p>{label}</p></div>'
+def _slen(items):
+    try: return len(items) if items is not None else 0
+    except TypeError: return 0
 def id_name_map(items): return {it.get("Id",""): it.get("Name",it.get("Id","?")) for it in (items or [])}
+def _num(v):
+    try: return float(v)
+    except (ValueError,TypeError): return 0.0
 
-def nz_ratio_1d(r):
-    """Proporción de componentes 1D con al menos un valor significativo (|v|>1e-9)."""
-    return sum(1 for c in COMPS_1D if any(abs(v)>1e-9 for v in _extract_numbers(r.get(c))))/len(COMPS_1D)
-
-def nz_ratio_mesh(r):
-    """Proporción de componentes de malla con al menos un valor significativo (|v|>1e-9).
-    Usa _extract_numbers para tolerar componentes que vienen como dicts o listas de dicts."""
-    return sum(1 for c in COMPS_MESH if any(abs(v)>1e-9 for v in _extract_numbers(r.get(c))))/len(COMPS_MESH)
-
-def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["LCSX","LCSY","LCSZ"])
-def fmt_vec(obj): return f"({obj.get('LCSX',0) or 0:.3f}, {obj.get('LCSY',0) or 0:.3f}, {obj.get('LCSZ',0) or 0:.3f})"
-def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
-
-def geom_type_raw(s):
-    """Devuelve el entero de Geometry Type buscando entre nombres de campo plausibles."""
-    for k in ("GeometryType","Geometry","GeomType","Geometria"):
-        if s.get(k) is not None:
-            return s.get(k)
+def _get_dp(obj, label):
+    for dp in (obj.get("DesignProperties") or []):
+        if dp.get("Label") == label:
+            return dp.get("Value")
     return None
 
-def geom_type_label(s):
-    gt=geom_type_raw(s)
-    if gt is None: return "—"
-    return GEOMETRY_TYPE.get(gt, str(gt))
+def _result_load(r):
+    """Extrae el ID de carga de un resultado, soportando tanto el formato antiguo (Load) como el nuevo (LoadCase/LoadCombination)."""
+    load_id = r.get("Load")
+    if load_id:
+        return load_id
+    rf = r.get("ResultFor")
+    lc = r.get("LoadCase")
+    lcb = r.get("LoadCombination")
+    if lc and (rf == 1 or rf is None):
+        return lc
+    if lcb and (rf in (0, None)):
+        return lcb
+    return lc or lcb or ""
 
-def is_non_planar(s):
-    gt=geom_type_raw(s)
-    return gt in NON_PLANAR_GEOM
+def _result_load_type(r, lc_ids, lc_names, combo_ids, combo_names):
+    """Determina el tipo de carga de un resultado: 'Caso Carga' o 'Combinacion'."""
+    lid = r.get("Load") or r.get("LoadCase") or r.get("LoadCombination") or ""
+    is_lc = lid in lc_ids or lid in lc_names
+    is_cb = lid in combo_ids or lid in combo_names
+    if is_lc and not is_cb: return "Caso Carga"
+    elif is_cb and not is_lc: return "Combinacion"
+    elif is_lc and is_cb: return "Caso Carga"
+    else: return "Carga/Combo"
+
+def nz_ratio_1d(r): 
+    """Calcula la proporción de componentes con valores significativos en resultados 1D.
+    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
+    return sum(1 for c in COMPS_1D if any(abs(_num(v))>1e-9 for v in r.get(c,[])))/len(COMPS_1D)
+
+def nz_ratio_mesh(r): 
+    """Calcula la proporción de componentes con valores significativos en resultados mesh.
+    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
+    return sum(1 for c in COMPS_MESH if any(abs(_num(v))>1e-9 for v in r.get(c,[])))/len(COMPS_MESH)
+
+def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["CoordinateX","CoordinateY","CoordinateZ"])
+def fmt_vec(obj): return f"({obj.get('CoordinateX',0) or 0:.3f}, {obj.get('CoordinateY',0) or 0:.3f}, {obj.get('CoordinateZ',0) or 0:.3f})"
+def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
 
 def project_to_2d(points_3d):
     if len(points_3d)<3: return [(p[0],p[1]) for p in points_3d]
-    # Normal robusta (metodo de Newell): usa TODOS los vertices, no solo los 3
-    # primeros. Evita el fallo cuando los primeros nodos son colineales (tipico en
-    # muros/superficies con varios nodos sobre un mismo borde recto), que con el
-    # metodo antiguo aplastaba el poligono a una linea y dejaba la cara sin triangular.
-    n=len(points_3d); nx=ny=nz=0.0
-    for i in range(n):
-        cur=points_3d[i]; nxt=points_3d[(i+1)%n]
-        nx+=(cur[1]-nxt[1])*(cur[2]+nxt[2])
-        ny+=(cur[2]-nxt[2])*(cur[0]+nxt[0])
-        nz+=(cur[0]-nxt[0])*(cur[1]+nxt[1])
-    ax,ay,az=abs(nx),abs(ny),abs(nz)
-    if az>=ax and az>=ay: return [(p[0],p[1]) for p in points_3d]   # plano dominante XY
-    elif ay>=ax:          return [(p[0],p[2]) for p in points_3d]   # plano dominante XZ
-    else:                 return [(p[1],p[2]) for p in points_3d]   # plano dominante YZ
+    p0,p1,p2=points_3d[0],points_3d[1],points_3d[2]
+    v1=(p1[0]-p0[0],p1[1]-p0[1],p1[2]-p0[2]); v2=(p2[0]-p0[0],p2[1]-p0[1],p2[2]-p0[2])
+    nx=abs(v1[1]*v2[2]-v1[2]*v2[1]); ny=abs(v1[2]*v2[0]-v1[0]*v2[2]); nz=abs(v1[0]*v2[1]-v1[1]*v2[0])
+    if nz>=nx and nz>=ny: return [(p[0],p[1]) for p in points_3d]
+    elif ny>=nx:           return [(p[0],p[2]) for p in points_3d]
+    else:                  return [(p[1],p[2]) for p in points_3d]
 
 def point_in_polygon_2d(px,py,polygon):
     n=len(polygon); inside=False; j=n-1
@@ -283,7 +255,7 @@ def add_lcs_traces_surfaces(fig, data, nm, scale):
             hover = f"<b>{name}</b><br>❌ Sin vector LCS definido<extra></extra>"
         else:
             status, angle = check_surface_lcs(surf, lcs)
-            lcs_type = surf.get("LCS", 0) or 0
+            lcs_type = surf.get("LCSType", 0) or 0
             eje = "X" if lcs_type == 1 else ("Y" if lcs_type == 2 else "—")
             if status == "ok":
                 color = LCS_OK_COLOR
@@ -333,29 +305,28 @@ def add_lcs_traces_bars(fig, data, nm, scale):
         marker=dict(size=10, color=LCS_OK_COLOR), name="LCS ✅ Correcto"))
     fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode="markers",
         marker=dict(size=10, color=LCS_BAD_COLOR), name="LCS ❌ Incorrecto / Sin definir"))
-
-
 # ─────────────────────────────────────────────────
 # RESUMEN
 # ─────────────────────────────────────────────────
 def render_overview(data):
     st.markdown('<p class="section-header">📊 Resumen del Modelo</p>', unsafe_allow_html=True)
     c1,c2=st.columns([2,1])
-    c1.markdown(f"### {data.get('Name','N/A')}")
-    c2.markdown(f"`{data.get('Description','')}`")
+    proj = data.get("ProjectInfo") or {}
+    c1.markdown(f"### {proj.get('Name','N/A')}")
+    c2.markdown(f"`{proj.get('Description','')}`")
     groups=[
         ("GEOMETRÍA",[("Materials","Materiales"),("CrossSections","Secciones"),("PointConnections","Nodos"),
             ("CurveMembers","Barras"),("SurfaceMembers","Superficies"),("SurfaceMemberOpenings","Aberturas"),
             ("SurfaceMemberRegions","Regiones"),("PointSupports","Apoyos")]),
         ("CARGAS",[("LoadCases","Casos"),("LoadCombinations","Combinaciones"),
             ("PointActions","Puntuales"),("CurveActions","Lineales"),("SurfaceActions","Superficiales")]),
-        ("RESULTADOS",[("Results1D","1D Barras"),("MeshResults","2D Malla"),("Macros","Macros")]),
+        ("RESULTADOS",[("Results1D","1D Barras"),("ResultsMeshes","2D Malla")]),
     ]
     for gn,ents in groups:
         st.markdown(f'<p class="group-label">{gn}</p>', unsafe_allow_html=True)
         cols=st.columns(len(ents))
         for col,(k,l) in zip(cols,ents):
-            col.markdown(mc(len(data.get(k,[])),l), unsafe_allow_html=True)
+            col.markdown(mc(_slen(data.get(k,[])),l), unsafe_allow_html=True)
 
 
 def render_materials(data):
@@ -365,15 +336,27 @@ def render_materials(data):
     rows=[]
     for m in mats:
         mt=m.get("Type",0)
+        E = _num(m.get("EModulus",0)); G = _num(m.get("GModulus",0))
+        rho = _num(m.get("UnitMass",0))
         row={"Nombre":m.get("Name",""),"Tipo":MATERIAL_TYPE.get(mt,str(mt)),
-             "E (MPa)":f"{m.get('EModulus',0)/1e6:.1f}" if m.get("EModulus",0)>1000 else f"{m.get('EModulus',0):.1f}",
-             "G (MPa)":f"{m.get('GModulus',0)/1e6:.1f}" if m.get("GModulus",0)>1000 else f"{m.get('GModulus',0):.1f}",
+             "E (MPa)":f"{E/1e6:.1f}" if E>1000 else f"{E:.1f}",
+             "G (MPa)":f"{G/1e6:.1f}" if G>1000 else f"{G:.1f}",
              "nu":m.get("PoissonCoefficient",""),
-             "rho (kg/m3)":f"{m.get('UnitMass',0)/9.81:.0f}" if m.get("UnitMass",0)>100 else f"{m.get('UnitMass',0):.1f}"}
-        if mt==1: row["Fck (MPa)"]=f"{m.get('Fck',0)/1e6:.1f}" if m.get("Fck",0)>1000 else f"{m.get('Fck',0):.1f}"
+             "rho (kg/m3)":f"{rho/9.81:.0f}" if rho>100 else f"{rho:.1f}"}
+        if mt==1:
+            Fck_val = m.get("Fck")
+            if Fck_val is None: Fck_val = _get_dp(m, 6)
+            Fck = _num(Fck_val or 0)
+            row["Fck (MPa)"]=f"{Fck/1e6:.1f}" if Fck>1000 else f"{Fck:.1f}"
         elif mt==2:
-            row["Fy (MPa)"]=f"{m.get('Fy',0)/1e6:.1f}" if m.get("Fy",0)>1000 else f"{m.get('Fy',0):.1f}"
-            row["Fu (MPa)"]=f"{m.get('Fu',0)/1e6:.1f}" if m.get("Fu",0)>1000 else f"{m.get('Fu',0):.1f}"
+            Fy_val = m.get("Fy")
+            if Fy_val is None: Fy_val = _get_dp(m, 6)
+            Fy = _num(Fy_val or 0)
+            row["Fy (MPa)"]=f"{Fy/1e6:.1f}" if Fy>1000 else f"{Fy:.1f}"
+            Fu_val = m.get("Fu")
+            if Fu_val is None: Fu_val = _get_dp(m, 7)
+            Fu = _num(Fu_val or 0)
+            row["Fu (MPa)"]=f"{Fu/1e6:.1f}" if Fu>1000 else f"{Fu:.1f}"
         rows.append(row)
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -383,9 +366,10 @@ def render_cross_sections(data):
     secs=data.get("CrossSections",[])
     if not secs: return st.info("No hay secciones.")
     mm=id_name_map(data.get("Materials",[]))
-    rows=[{"Nombre":s.get("Name",""),"Tipo":CS_TYPE.get(s.get("Type",-1),"?"),
+    rows=[{"Nombre":s.get("Name",""),
+           "Tipo":CS_TYPE.get(s.get("CrossSectionType",s.get("Type",-1)),"?"),
            "Forma":CS_SHAPE.get(s.get("Shape",-1),str(s.get("Shape",-1))),
-           "Parametros (m)":", ".join(f"{p:.3f}" for p in s.get("Parameters",[])),
+           "Parametros (m)":", ".join(f"{_num(p):.3f}" for p in s.get("Parameters",[])),
            "Material":", ".join(mm.get(mid,mid[:8]) for mid in s.get("Materials",[]))} for s in secs]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
@@ -452,7 +436,6 @@ def render_3d_model(data):
         fig.add_trace(go.Scatter3d(x=co["x"],y=co["y"],z=co["z"],mode='lines',
             line=dict(color=cmap.get(bt,"#748ffc"),width=3),name=bt,connectgaps=False))
 
-    non_planar_names=[]
     if show_panels:
         opening_map={}
         for op in data.get("SurfaceMemberOpenings",[]):
@@ -460,6 +443,8 @@ def render_3d_model(data):
             pts_op=[nm.get(nid) for nid in op.get("Nodes",[])]
             pts_op=[p for p in pts_op if p]
             if len(pts_op)>=3:
+                if pts_op[0]["Id"] != pts_op[-1]["Id"]:
+                    pts_op.append(pts_op[0])
                 if sid not in opening_map: opening_map[sid]=[]
                 opening_map[sid].append([(p["X"],p["Y"],p["Z"]) for p in pts_op])
 
@@ -491,40 +476,20 @@ def render_3d_model(data):
                     (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op2d) for op2d in ops2d)]
             return tris
 
-        # Render robusto: agrupa por el valor REAL de "Type" de cada superficie.
-        # Antes se filtraba contra una lista fija {0,1,2,3}; cualquier superficie con
-        # otro Type (p. ej. muros cuyo Type no es 1) quedaba sin dibujar en silencio.
-        TYPE_COLORS={
-            0:("rgba(100,180,255,0.55)","rgba(100,180,255,0.85)"),
-            1:("rgba(255,160,80,0.55)", "rgba(255,160,80,0.85)"),
-            2:("rgba(150,230,160,0.55)","rgba(150,230,160,0.85)"),
-            3:("rgba(255,215,100,0.50)","rgba(255,215,100,0.85)"),
-        }
-        FALLBACK_COLORS=[("rgba(204,93,232,0.50)","rgba(204,93,232,0.85)"),
-                         ("rgba(120,143,252,0.50)","rgba(120,143,252,0.85)"),
-                         ("rgba(255,107,107,0.50)","rgba(255,107,107,0.85)"),
-                         ("rgba(81,207,102,0.50)", "rgba(81,207,102,0.85)")]
-        groups={}
-        for surf in data.get("SurfaceMembers",[]):
-            groups.setdefault(surf.get("Type",0),[]).append(surf)
-        fb=0
-        for tval in sorted(groups.keys(), key=lambda x:(x is None, str(x))):
-            label=SURFACE_TYPE.get(tval, f"Superficie (Type {tval})")
-            if tval in TYPE_COLORS:
-                color,ecolor=TYPE_COLORS[tval]
-            else:
-                color,ecolor=FALLBACK_COLORS[fb%len(FALLBACK_COLORS)]; fb+=1
+        for stype,label,color,ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
+                                          (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
-            for surf in groups[tval]:
+            for surf in data.get("SurfaceMembers",[]):
+                if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
                 pts=[nm.get(nid) for nid in surf.get("Nodes",[])]
                 pts=[p for p in pts if p]
                 if len(pts)<3: continue
-                if is_non_planar(surf):
-                    non_planar_names.append(surf.get("Name",sid))
+                if pts[0]["Id"] != pts[-1]["Id"]:
+                    pts.append(pts[0])
                 off=len(mx["x"])
-                for p in pts: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
-                for i0,i1,i2 in triangulate(pts, opening_map.get(sid)):
+                for p in pts[:-1]: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
+                for i0,i1,i2 in triangulate(pts[:-1], opening_map.get(sid)):
                     mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
                 for p in pts: ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
                 ex["x"].extend([pts[0]["X"],None]); ex["y"].extend([pts[0]["Y"],None]); ex["z"].extend([pts[0]["Z"],None])
@@ -540,6 +505,8 @@ def render_3d_model(data):
             pts=[nm.get(nid) for nid in op.get("Nodes",[])]
             pts=[p for p in pts if p]
             if len(pts)<3: continue
+            if pts[0]["Id"] != pts[-1]["Id"]:
+                pts.append(pts[0])
             for p in pts: ox.append(p["X"]); oy.append(p["Y"]); oz.append(p["Z"])
             ox.extend([pts[0]["X"],None]); oy.extend([pts[0]["Y"],None]); oz.extend([pts[0]["Z"],None])
         if ox: fig.add_trace(go.Scatter3d(x=ox,y=oy,z=oz,mode='lines',line=dict(color="#ff0",width=3),name="Aberturas",connectgaps=False))
@@ -558,12 +525,6 @@ def render_3d_model(data):
             bgcolor="rgba(20,20,40,0.85)",bordercolor="#0f3460",borderwidth=1,
             font=dict(size=11)))
     st.plotly_chart(fig, use_container_width=True)
-
-    if non_planar_names:
-        st.caption(f"⚠️ {len(non_planar_names)} superficie(s) con geometría no plana "
-                   f"(NURBS / Quadrangle / Pipe / etc.): se dibujan como aproximación plana "
-                   f"a partir de sus nodos de borde → {', '.join(non_planar_names[:8])}"
-                   f"{' …' if len(non_planar_names)>8 else ''}")
 
     if show_lcs:
         nm_local={n.get("Id"):n for n in data.get("PointConnections",[])}
@@ -679,33 +640,27 @@ def render_surfaces(data):
     mm=id_name_map(data.get("Materials",[]))
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
 
-    g1,g2=st.columns(2)
-    with g1:
-        tc=Counter(SURFACE_TYPE.get(s.get("Type",0),"Other") for s in surfs)
-        fig=px.pie(values=list(tc.values()),names=list(tc.keys()),title="Por Tipo estructural",color_discrete_sequence=px.colors.qualitative.Pastel)
-        fig.update_layout(template="plotly_dark",height=280,margin=dict(t=40,b=0))
+    tc=Counter(SURFACE_TYPE.get(s.get("Type",0),"Other") for s in surfs)
+    c1,c2=st.columns([1,2])
+    with c1:
+        fig=px.pie(values=list(tc.values()),names=list(tc.keys()),title="Por Tipo",color_discrete_sequence=px.colors.qualitative.Pastel)
+        fig.update_layout(template="plotly_dark",height=300,margin=dict(t=40,b=0))
         st.plotly_chart(fig, use_container_width=True)
-    with g2:
-        gc=Counter(geom_type_label(s) for s in surfs)
-        fig=px.pie(values=list(gc.values()),names=list(gc.keys()),title="Por Geometry Type",color_discrete_sequence=px.colors.qualitative.Set3)
-        fig.update_layout(template="plotly_dark",height=280,margin=dict(t=40,b=0))
-        st.plotly_chart(fig, use_container_width=True)
-
-    rows=[]
-    for s in surfs:
-        lcs=compute_surface_lcs(s, nm)
-        status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-        rows.append({"ID":s.get("Id",""),"Nombre":s.get("Name",""),
-            "Tipo":SURFACE_TYPE.get(s.get("Type",0),"?"),
-            "Geometría":geom_type_label(s),
-            "Espesor":s.get("Thickness",""),"Nodos":len(s.get("Nodes",[])),
-            "Material":", ".join(mm.get(mid,mid[:8]) for mid in s.get("Materials",[])),
-            "LCS Tipo":SURFACE_LCS_TYPE.get(s.get("LCS"),"-") if s.get("LCS") is not None else "—",
-            "Vector":fmt_vec(s) if has_lcs_vector(s) else "—",
-            "Rot (deg)":f"{s.get('LCSRotation'):.1f}" if s.get("LCSRotation") is not None else "—",
-            "LCS":_status_icon(status),
-            "Angulo (deg)":f"{angle:.2f}" if angle is not None else "—"})
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
+    with c2:
+        rows=[]
+        for s in surfs:
+            lcs=compute_surface_lcs(s, nm)
+            status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
+            rows.append({"ID":s.get("Id",""),"Nombre":s.get("Name",""),
+                "Tipo":SURFACE_TYPE.get(s.get("Type",0),"?"),
+                "Espesor":s.get("Thickness",""),"Nodos":len(s.get("Nodes",[])),
+                "Material":", ".join(mm.get(mid,mid[:8]) for mid in s.get("Materials",[])),
+                "LCS Tipo":SURFACE_LCS_TYPE.get(s.get("LCSType"),"-") if s.get("LCSType") is not None else "—",
+                "Vector":fmt_vec(s) if has_lcs_vector(s) else "—",
+                "Rot (deg)":f"{_num(s.get('LCSRotation')):.1f}" if s.get("LCSRotation") is not None else "—",
+                "LCS":_status_icon(status),
+                "Angulo (deg)":f"{angle:.2f}" if angle is not None else "—"})
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
 
     surfs_vec=[s for s in surfs if has_lcs_vector(s)]
     if surfs_vec:
@@ -715,16 +670,15 @@ def render_surfaces(data):
         for s in surfs_vec:
             lcs=compute_surface_lcs(s, nm)
             status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-            lcs_type=s.get("LCS",0) or 0
+            lcs_type=s.get("LCSType",0) or 0
             xl=fmt_axis(lcs["x"]) if lcs else "—"; yl=fmt_axis(lcs["y"]) if lcs else "—"; zl=fmt_axis(lcs["z"]) if lcs else "—"
             rows2.append({"Nombre":s.get("Name",""),
                 "Tipo sup":SURFACE_TYPE.get(s.get("Type",0),"?"),
-                "Geometría":geom_type_label(s),
                 "LCS Tipo":SURFACE_LCS_TYPE.get(lcs_type,"—"),
                 "Eje verificado":"X" if lcs_type==1 else ("Y" if lcs_type==2 else "—"),
                 "Vector JSON":fmt_vec(s),
                 "X local":xl,"Y local":yl,"Z local (normal)":zl,
-                "Rot (deg)":f"{s.get('LCSRotation'):.2f}" if s.get("LCSRotation") is not None else "—",
+                "Rot (deg)":f"{_num(s.get('LCSRotation')):.2f}" if s.get("LCSRotation") is not None else "—",
                 "Estado":_status_label(status),
                 "Angulo error (deg)":f"{angle:.2f}" if angle is not None else "—"})
         df2=pd.DataFrame(rows2)
@@ -768,7 +722,7 @@ def render_loads(data):
         st.markdown("**Casos de Carga**")
         st.dataframe(pd.DataFrame([{"Nombre":c.get("Name",""),
             "Accion":ACTION_TYPE_LC.get(c.get("ActionType",-1),"?"),
-            "Tipo":LOAD_TYPE.get(c.get("Type",-1),"?")} for c in cases]),use_container_width=True,hide_index=True)
+            "Tipo":LOAD_TYPE.get(c.get("LoadType",c.get("Type",-1)),"?")} for c in cases]),use_container_width=True,hide_index=True)
     combos=data.get("LoadCombinations",[])
     if combos:
         st.markdown("**Combinaciones**")
@@ -792,14 +746,14 @@ def render_actions(data):
     ca=data.get("CurveActions",[])
     if ca:
         st.markdown(f"**Lineales** ({len(ca)})")
-        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Barra":a.get("CurveMember",""),
+        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Barra":a.get("Member",a.get("CurveMember","")),
             "Dist.":DISTRIBUTION.get(a.get("Distribution",0),"?"),
             "X":a.get("X",0),"Y":a.get("Y",0),"Z":a.get("Z",0),
             "Caso":lm.get(a.get("LoadCase",""),"?")} for a in ca]),use_container_width=True,hide_index=True)
     sa=data.get("SurfaceActions",[])
     if sa:
         st.markdown(f"**Superficiales** ({len(sa)})")
-        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Superficie":a.get("SurfaceElement",""),
+        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Superficie":a.get("Member",""),
             "Qx":a.get("Qx",0),"Qy":a.get("Qy",0),"Qz":a.get("Qz",0),
             "Caso":lm.get(a.get("LoadCase",""),"?")} for a in sa]),use_container_width=True,hide_index=True)
 
@@ -812,13 +766,13 @@ def render_results_1d(data):
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
     result_index={}; bar_summary={}
     for r in results:
-        bid=r.get("Member",""); lid=r.get("Load","")
+        bid=r.get("Member","") or ""; lid=_result_load(r)
         result_index[(bid,lid)]=r; ratio=nz_ratio_1d(r)
         if bid not in bar_summary: bar_summary[bid]={"nz":0,"z":0,"max":{c:0 for c in COMPS_1D}}
         if ratio>0: bar_summary[bid]["nz"]+=1
         else: bar_summary[bid]["z"]+=1
         for c in COMPS_1D:
-            vals=[abs(v) for v in _extract_numbers(r.get(c))]
+            vals=[abs(_num(v)) for v in r.get(c,[])]
             if vals: bar_summary[bid]["max"][c]=max(bar_summary[bid]["max"][c],max(vals))
     total=len(results); full=sum(1 for r in results if nz_ratio_1d(r)==1.0)
     partial=sum(1 for r in results if 0<nz_ratio_1d(r)<1.0); empty=sum(1 for r in results if nz_ratio_1d(r)==0)
@@ -826,14 +780,14 @@ def render_results_1d(data):
     m1.metric("Total",total); m2.metric("Completos",full); m3.metric("Parciales",partial); m4.metric("Vacios",empty)
     bar_obj_map={b.get("Id",""):b for b in data.get("CurveMembers",[])}
     rows=[]
-    for bid in sorted(bar_summary.keys(), key=lambda x:int(x) if x.isdigit() else 0):
+    for bid in sorted(bar_summary.keys(), key=lambda x:str(x)):
         info=bar_summary[bid]; mv=info["max"]
         b=bar_obj_map.get(bid,{}); lcs=compute_bar_lcs(b,nm) if b else None
         status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
         rows.append({"Barra":f"Bar {bid}","bar_id":bid,
             "Estado":"OK" if info["nz"]>0 else "vacio","Casos NZ":info["nz"],
-            "|N|":f"{mv['aN']:.2f}","|Vy|":f"{mv['aVy']:.2f}","|Vz|":f"{mv['aVz']:.2f}",
-            "|Mx|":f"{mv['aMx']:.2f}","|My|":f"{mv['aMy']:.2f}","|Mz|":f"{mv['aMz']:.2f}",
+            "|N|":f"{mv['N']:.2f}","|Vy|":f"{mv['Vy']:.2f}","|Vz|":f"{mv['Vz']:.2f}",
+            "|Mx|":f"{mv['Mx']:.2f}","|My|":f"{mv['My']:.2f}","|Mz|":f"{mv['Mz']:.2f}",
             "LCS":_status_icon(status),"Ang LCS":f"{angle:.1f}°" if angle is not None else "—"})
     df=pd.DataFrame(rows)
     filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="f1d")
@@ -843,7 +797,8 @@ def render_results_1d(data):
     st.markdown("---"); st.markdown("#### Diagrama detallado")
     bar_ids=df["bar_id"].tolist()
     if not bar_ids: return
-    load_ids=sorted(set(r.get("Load","") for r in results)); load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
+    load_ids=sorted(set(str(_result_load(r)) for r in results))
+    load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
     sc1,sc2=st.columns(2)
     sel_bar=sc1.selectbox("Barra:",bar_ids,format_func=lambda x:f"Bar {x}",key="sel_bar")
     sel_load=load_ids[load_names.index(sc2.selectbox("Caso:",load_names,key="sel_load"))]
@@ -855,15 +810,15 @@ def render_results_1d(data):
         a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
         st.info(f"🧭 LCS Barra {sel_bar}: {_status_label(status)}{a_str} | Vector: {fmt_vec(b)}")
     secs=r.get("SectionsAt",[])
-    comps={"N (kN)":_extract_numbers(r.get("aN")),"Vy (kN)":_extract_numbers(r.get("aVy")),"Vz (kN)":_extract_numbers(r.get("aVz")),
-           "Mx (kNm)":_extract_numbers(r.get("aMx")),"My (kNm)":_extract_numbers(r.get("aMy")),"Mz (kNm)":_extract_numbers(r.get("aMz"))}
-    nz_comps=[n for n,v in comps.items() if any(abs(x)>1e-9 for x in v)]
+    comps={"N (kN)":r.get("N",[]),"Vy (kN)":r.get("Vy",[]),"Vz (kN)":r.get("Vz",[]),
+           "Mx (kNm)":r.get("Mx",[]),"My (kNm)":r.get("My",[]),"Mz (kNm)":r.get("Mz",[])}
+    nz_comps=[n for n,v in comps.items() if any(abs(_num(x))>1e-9 for x in v)]
     defaults=[c for c in ["Vz (kN)","My (kNm)"] if c in nz_comps] or nz_comps[:2]
     sel_comps=st.multiselect("Componentes:",list(comps.keys()),default=defaults,key="mc1d")
     if sel_comps and secs:
         fig=go.Figure()
         for i,comp in enumerate(sel_comps):
-            vals=comps.get(comp,[])
+            vals=[_num(v) for v in comps.get(comp,[])]
             if vals: fig.add_trace(go.Scatter(x=secs,y=vals,name=comp,mode='lines+markers',
                 line=dict(color=PLOT_COLORS[i%len(PLOT_COLORS)],width=2),marker=dict(size=5)))
         fig.update_layout(template="plotly_dark",xaxis_title="Posicion (m)",height=400,margin=dict(t=30,b=40),legend=dict(orientation="h",y=1.1))
@@ -872,19 +827,19 @@ def render_results_1d(data):
 
 def render_mesh_results(data):
     st.markdown('<p class="section-header">🔺 Resultados Malla 2D</p>', unsafe_allow_html=True)
-    results=data.get("MeshResults",[])
+    results=data.get("ResultsMeshes",[])
     if not results: return st.info("No hay resultados de malla.")
     lm={**id_name_map(data.get("LoadCases",[])),**id_name_map(data.get("LoadCombinations",[]))}
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
     result_index={}; panel_summary={}
     for r in results:
-        pid=r.get("Member",""); lid=r.get("Load","")
+        pid=r.get("MeshMember","") or ""; lid=_result_load(r)
         result_index[(pid,lid)]=r; ratio=nz_ratio_mesh(r)
         if pid not in panel_summary: panel_summary[pid]={"nz":0,"z":0,"max":{c:0 for c in COMPS_MESH}}
         if ratio>0: panel_summary[pid]["nz"]+=1
         else: panel_summary[pid]["z"]+=1
         for c in COMPS_MESH:
-            vals=[abs(v) for v in _extract_numbers(r.get(c))]
+            vals=[abs(_num(v)) for v in r.get(c,[])]; 
             if vals: panel_summary[pid]["max"][c]=max(panel_summary[pid]["max"][c],max(vals))
     total=len(results); full=sum(1 for r in results if nz_ratio_mesh(r)==1.0)
     partial=sum(1 for r in results if 0<nz_ratio_mesh(r)<1.0); empty=sum(1 for r in results if nz_ratio_mesh(r)==0)
@@ -892,46 +847,43 @@ def render_mesh_results(data):
     m1.metric("Total",total); m2.metric("Completos",full); m3.metric("Parciales",partial); m4.metric("Vacios",empty)
     surf_obj_map={s.get("Id",""):s for s in data.get("SurfaceMembers",[])}
     rows=[]
-    for pid in sorted(panel_summary.keys(), key=lambda x:int(x) if x.isdigit() else 0):
+    for pid in sorted(panel_summary.keys(), key=lambda x:str(x)):
         info=panel_summary[pid]; mv=info["max"]
         s=surf_obj_map.get(pid,{}); lcs=compute_surface_lcs(s,nm) if s else None
         status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
         rows.append({"Panel":f"Panel {pid}","panel_id":pid,
-            "Tipo":SURFACE_TYPE.get(s.get("Type",0),"?"),
             "Estado":"OK" if info["nz"]>0 else "vacio",
-            "|mx|":f"{mv['amx']:.2f}","|my|":f"{mv['amy']:.2f}",
-            "|nx|":f"{mv['anx']:.2f}","|ny|":f"{mv['any']:.2f}",
-            "|vx|":f"{mv['avx']:.2f}","|vy|":f"{mv['avy']:.2f}",
+            "|Mx|":f"{mv['Mx']:.2f}","|My|":f"{mv['My']:.2f}",
+            "|Nx|":f"{mv['Nx']:.2f}","|Ny|":f"{mv['Ny']:.2f}",
+            "|Vx|":f"{mv['Vx']:.2f}","|Vy|":f"{mv['Vy']:.2f}",
             "LCS":_status_icon(status),"Ang LCS":f"{angle:.1f}°" if angle is not None else "—"})
     df=pd.DataFrame(rows)
     filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="fmesh")
     if filt=="Con valores": df=df[df["Estado"]=="OK"]
     elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
     st.dataframe(df.drop(columns=["panel_id"]),use_container_width=True,hide_index=True,height=280)
-    if "Tipo" in df.columns and not df.empty:
-        tc=df["Tipo"].value_counts()
-        st.caption(f"Distribución por tipo: {', '.join(f'{k}={v}' for k,v in tc.items())}")
     st.markdown("---"); st.markdown("#### Diagrama detallado")
     panel_ids=df["panel_id"].tolist()
     if not panel_ids: return
-    load_ids=sorted(set(r.get("Load","") for r in results)); load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
+    load_ids=sorted(set(str(_result_load(r)) for r in results))
+    load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
     sc1,sc2=st.columns(2)
     sel_panel=sc1.selectbox("Panel:",panel_ids,format_func=lambda x:f"Panel {x}",key="sel_panel")
     sel_load=load_ids[load_names.index(sc2.selectbox("Caso:",load_names,key="sel_load_m"))]
     r=result_index.get((sel_panel,sel_load))
     if not r: return st.warning("Sin resultado.")
     s=surf_obj_map.get(sel_panel,{})
-    if has_lcs_vector(s) or s.get("LCS") is not None:
+    if has_lcs_vector(s) or s.get("LCSType") is not None:
         lcs=compute_surface_lcs(s,nm); status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
         a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
-        rot=s.get("LCSRotation"); r_str=f" | Rot: {rot:.2f} deg" if rot is not None else ""
+        rot=s.get("LCSRotation"); r_str=f" | Rot: {_num(rot):.2f} deg" if rot is not None else ""
         st.info(f"🧭 LCS Panel {sel_panel}: {_status_label(status)}{a_str} | Vector: {fmt_vec(s)}{r_str}")
-    comps={c:_extract_numbers(r.get(c)) for c in COMPS_MESH if r.get(c) is not None}
-    nz_comps={k:v for k,v in comps.items() if any(abs(x)>1e-9 for x in v)}
-    comp_list=list(nz_comps.keys()) if nz_comps else [k for k,v in comps.items() if v]
+    comps={c:r.get(c,[]) for c in COMPS_MESH if r.get(c)}
+    nz_comps={k:v for k,v in comps.items() if any(abs(_num(x))>1e-9 for x in v)}
+    comp_list=list(nz_comps.keys()) if nz_comps else list(comps.keys())
     if not comp_list: return st.info("Sin componentes con valores.")
     sel=st.selectbox("Componente:",comp_list,key="sel_comp_m")
-    vals=comps.get(sel,[])
+    vals=[_num(v) for v in comps.get(sel,[])]
     if vals:
         fig=go.Figure()
         fig.add_trace(go.Bar(x=list(range(1,len(vals)+1)),y=vals,marker_color=["#e94560" if v<0 else "#4a9eff" for v in vals]))
@@ -948,7 +900,7 @@ def render_lcs_global(data):
     st.markdown('<p class="section-header">🧭 Sistemas de Coordenadas Locales (LCS)</p>', unsafe_allow_html=True)
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
     st.info(f"""**Verificacion geometrica:** Se calculan los ejes locales reales desde la geometria del elemento 
-y se comparan con el vector `(LCSX, LCSY, LCSZ)` declarado en el JSON.  
+y se comparan con el vector `(CoordinateX, CoordinateY, CoordinateZ)` declarado en el JSON.  
 Tolerancia de alineacion: **{ANGLE_TOL_DEG}°**  
 **Superficies:** Z local = normal al plano | Si LCS=1 → X debe coincidir con vector | Si LCS=2 → Y debe coincidir  
 **Barras:** X local = n1→n2 | Si LCS=0 → Y debe coincidir con vector | Si LCS=1 → Z debe coincidir""")
@@ -963,17 +915,16 @@ Tolerancia de alineacion: **{ANGLE_TOL_DEG}°**
             for s in surfs:
                 lcs=compute_surface_lcs(s, nm)
                 status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-                lcs_type=s.get("LCS",0) or 0
+                lcs_type=s.get("LCSType",0) or 0
                 rows.append({"Nombre":s.get("Name",""),
                     "Tipo":SURFACE_TYPE.get(s.get("Type",0),"?"),
-                    "Geometría":geom_type_label(s),
                     "LCS enum":lcs_type,
                     "Eje verificado":"X" if lcs_type==1 else ("Y" if lcs_type==2 else "—"),
                     "Vector JSON":fmt_vec(s) if has_lcs_vector(s) else "—",
                     "X local":fmt_axis(lcs["x"]) if lcs else "—",
                     "Y local":fmt_axis(lcs["y"]) if lcs else "—",
                     "Z local (normal)":fmt_axis(lcs["z"]) if lcs else "—",
-                    "Rot (deg)":f"{s.get('LCSRotation'):.2f}" if s.get("LCSRotation") is not None else "—",
+                "Rot (deg)":f"{_num(s.get('LCSRotation')):.2f}" if s.get("LCSRotation") is not None else "—",
                     "Estado":_status_label(status),
                     "Angulo error (deg)":f"{angle:.2f}" if angle is not None else "—"})
             df=pd.DataFrame(rows)
@@ -1017,6 +968,279 @@ Tolerancia de alineacion: **{ANGLE_TOL_DEG}°**
 
 
 # ─────────────────────────────────────────────────
+# REFERENCIAS
+# ─────────────────────────────────────────────────
+def render_references(data):
+    st.markdown('<p class="section-header">🔗 Referencias</p>', unsafe_allow_html=True)
+
+    mm = id_name_map(data.get("Materials",[]))
+    csm = id_name_map(data.get("CrossSections",[]))
+    nm_id = id_name_map(data.get("PointConnections",[]))
+    bar_map = id_name_map(data.get("CurveMembers",[]))
+    surf_map = id_name_map(data.get("SurfaceMembers",[]))
+    lc_map = id_name_map(data.get("LoadCases",[]))
+    combo_map = id_name_map(data.get("LoadCombinations",[]))
+    all_load_map = {**lc_map, **combo_map}
+
+    mat_set = set(mm.keys()); cs_set = set(csm.keys()); node_set = set(nm_id.keys())
+    bar_set = set(bar_map.keys()); surf_set = set(surf_map.keys())
+    lc_ids = set(lc_map.keys()); lc_names = set(lc_map.values())
+    combo_ids = set(combo_map.keys()); combo_names = set(combo_map.values())
+    all_load_set = lc_ids | combo_ids | lc_names | combo_names
+
+    refs = []
+    broken = []
+
+    def add_ref(src_type, src_name, target_type, target_name, field, ok):
+        refs.append((src_type, src_name, target_type, target_name, field, "✅" if ok else "❌"))
+        if not ok: broken.append((src_type, src_name, target_type, target_name, field))
+
+    # ── RECOLECCIÓN DE REFERENCIAS ──
+
+    # CrossSections → Materials
+    for cs in data.get("CrossSections",[]):
+        for mid in cs.get("Materials",[]):
+            add_ref("Seccion", cs.get("Name",""), "Material", mm.get(mid, mid), "Materials", mid in mat_set)
+
+    # CurveMembers → CrossSection + Nodes
+    for bar in data.get("CurveMembers",[]):
+        csid = bar.get("CrossSection","")
+        if csid: add_ref("Barra", bar.get("Name",""), "Seccion", csm.get(csid, csid), "CrossSection", csid in cs_set)
+        else: broken.append(("Barra", bar.get("Name",""), "Seccion", "— (sin definir)", "CrossSection"))
+        for nid in bar.get("Nodes",[]):
+            add_ref("Barra", bar.get("Name",""), "Nodo", nm_id.get(nid, nid), "Nodes", nid in node_set)
+
+    # SurfaceMembers → Nodes + Materials
+    for surf in data.get("SurfaceMembers",[]):
+        for nid in surf.get("Nodes",[]):
+            add_ref("Superficie", surf.get("Name",""), "Nodo", nm_id.get(nid, nid), "Nodes", nid in node_set)
+        for mid in surf.get("Materials",[]):
+            add_ref("Superficie", surf.get("Name",""), "Material", mm.get(mid, mid), "Materials", mid in mat_set)
+
+    # SurfaceMemberRegions → Surface + Nodes
+    for reg in data.get("SurfaceMemberRegions",[]):
+        sid = reg.get("Surface","")
+        if sid: add_ref("Region", reg.get("Name",""), "Superficie", surf_map.get(sid, sid), "Surface", sid in surf_set)
+        for nid in reg.get("Nodes",[]):
+            add_ref("Region", reg.get("Name",""), "Nodo", nm_id.get(nid, nid), "Nodes", nid in node_set)
+
+    # SurfaceMemberOpenings → Surface + Nodes
+    for op in data.get("SurfaceMemberOpenings",[]):
+        sid = op.get("Surface","")
+        if sid: add_ref("Abertura", op.get("Name",""), "Superficie", surf_map.get(sid, sid), "Surface", sid in surf_set)
+        for nid in op.get("Nodes",[]):
+            add_ref("Abertura", op.get("Name",""), "Nodo", nm_id.get(nid, nid), "Nodes", nid in node_set)
+
+    # PointSupports → Nodes
+    for sup in data.get("PointSupports",[]):
+        nid = sup.get("Node","")
+        if nid: add_ref("Apoyo", sup.get("Name",""), "Nodo", nm_id.get(nid, nid), "Node", nid in node_set)
+
+    # PointActions → LoadCase + ReferenceNode
+    for act in data.get("PointActions",[]):
+        lid = act.get("LoadCase","")
+        if lid: add_ref("Accion Puntual", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
+        nid = act.get("ReferenceNode","")
+        if nid: add_ref("Accion Puntual", act.get("Name",""), "Nodo", nm_id.get(nid, nid), "ReferenceNode", nid in node_set)
+
+    # CurveActions → LoadCase + CurveMember
+    for act in data.get("CurveActions",[]):
+        lid = act.get("LoadCase","")
+        if lid: add_ref("Accion Lineal", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
+        bid = act.get("Member", act.get("CurveMember",""))
+        if bid: add_ref("Accion Lineal", act.get("Name",""), "Barra", bar_map.get(bid, bid), "Member", bid in bar_set)
+
+    # SurfaceActions → LoadCase + Member
+    for act in data.get("SurfaceActions",[]):
+        lid = act.get("LoadCase","")
+        if lid: add_ref("Accion Superficial", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
+        sid = act.get("Member","")
+        if sid: add_ref("Accion Superficial", act.get("Name",""), "Superficie", surf_map.get(sid, sid), "Member", sid in surf_set)
+
+    # LoadCombinations → LoadCases
+    for combo in data.get("LoadCombinations",[]):
+        lids = combo.get("LoadCases",[]); facs = combo.get("LoadFactors",[])
+        for j, lid in enumerate(lids):
+            fac = facs[j] if j < len(facs) else "?"
+            tname = f"{lc_map.get(lid, lid)} (x{fac})"
+            add_ref("Combinacion", combo.get("Name",""), "Caso Carga", tname, "LoadCases", lid in lc_ids or lid in lc_names)
+
+    # Results1D → CurveMember + Load (distinguiendo Caso vs Combinacion)
+    seen_1d = set()
+    for r in data.get("Results1D",[]):
+        bid = r.get("Member",""); lid = _result_load(r)
+        key = (bid, lid)
+        if key not in seen_1d:
+            seen_1d.add(key)
+            bname = bar_map.get(bid, bid) if bid else "—"
+            if bid: add_ref("Resultado 1D", f"Bar {bid} ({bname})", "Barra", bname, "Member", bid in bar_set)
+            else: broken.append(("Resultado 1D", f"[sin barra]", "Barra", "— (sin definir)", "Member"))
+            lname = all_load_map.get(lid, lid) if lid else "—"
+            if lid:
+                is_lc = lid in lc_ids or lid in lc_names
+                is_cb = lid in combo_ids or lid in combo_names
+                if is_lc and not is_cb: load_type = "Caso Carga"
+                elif is_cb and not is_lc: load_type = "Combinacion"
+                elif is_lc and is_cb: load_type = "Caso Carga"
+                else: load_type = "Carga/Combo"
+                add_ref("Resultado 1D", f"Bar {bid} ({bname})", load_type, lname, "Load", lid in all_load_set)
+            else:
+                broken.append(("Resultado 1D", f"Bar {bid} ({bname})", "Carga/Combo", "— (sin definir)", "Load"))
+
+    # ResultsMeshes → MeshMember + Load (distinguiendo Caso vs Combinacion)
+    seen_mesh = set()
+    for r in data.get("ResultsMeshes",[]):
+        pid = r.get("MeshMember",""); lid = _result_load(r)
+        key = (pid, lid)
+        if key not in seen_mesh:
+            seen_mesh.add(key)
+            pname = surf_map.get(pid, pid) if pid else "—"
+            if pid: add_ref("Resultado Malla", f"Panel {pid} ({pname})", "Superficie", pname, "MeshMember", pid in surf_set)
+            else: broken.append(("Resultado Malla", f"[sin panel]", "Superficie", "— (sin definir)", "MeshMember"))
+            lname = all_load_map.get(lid, lid) if lid else "—"
+            if lid:
+                is_lc = lid in lc_ids or lid in lc_names
+                is_cb = lid in combo_ids or lid in combo_names
+                if is_lc and not is_cb: load_type = "Caso Carga"
+                elif is_cb and not is_lc: load_type = "Combinacion"
+                elif is_lc and is_cb: load_type = "Caso Carga"
+                else: load_type = "Carga/Combo"
+                add_ref("Resultado Malla", f"Panel {pid} ({pname})", load_type, lname, "Load", lid in all_load_set)
+            else:
+                broken.append(("Resultado Malla", f"Panel {pid} ({pname})", "Carga/Combo", "— (sin definir)", "Load"))
+
+    if not refs and not broken:
+        return st.info("No hay referencias para analizar.")
+
+    # ── MÉTRICAS ──
+    total = len(refs); ok_n = total - sum(1 for r in refs if r[5] == "❌")
+    bad_n = len(broken)
+    c1,c2,c3 = st.columns(3)
+    c1.metric("Total Referencias", total)
+    c2.metric("✅ Validas", ok_n)
+    c3.metric("❌ Rotas", bad_n, delta=f"-{bad_n}" if bad_n > 0 else None)
+
+    # ── SUB-TABS POR CATEGORÍA ──
+    tab_res, tab_geo, tab_car, tab_falt = st.tabs([
+        "📈 Resultados", "🏗️ Elementos", "⚡ Cargas y Acciones", "❌ Faltantes"
+    ])
+
+    # ─── TAB: RESULTADOS ───
+    with tab_res:
+        rr1d = [r for r in refs if r[0] == "Resultado 1D"]
+        rrm  = [r for r in refs if r[0] == "Resultado Malla"]
+        br1d = [r for r in broken if r[0] == "Resultado 1D"]
+        brm  = [r for r in broken if r[0] == "Resultado Malla"]
+
+        # ── Resultados 1D ──
+        if rr1d:
+            rr1d_load = [r for r in rr1d if r[2] in ("Caso Carga","Combinacion")]
+            rr1d_lc   = [r for r in rr1d_load if r[2] == "Caso Carga"]
+            rr1d_co   = [r for r in rr1d_load if r[2] == "Combinacion"]
+            rr1d_mem  = [r for r in rr1d if r[3] == "Member"]
+            st.markdown(f"#### 📊 Resultados 1D — {len(seen_1d)} pares barra/carga")
+
+            if rr1d_lc:
+                with st.expander(f"🎯 Por Caso de Carga ({len(rr1d_lc)})", expanded=True):
+                    df = pd.DataFrame(rr1d_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if rr1d_co:
+                with st.expander(f"🔀 Por Combinacion ({len(rr1d_co)})", expanded=True):
+                    df = pd.DataFrame(rr1d_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if rr1d_mem:
+                with st.expander(f"🔩 Referencias a Barras ({len(rr1d_mem)})", expanded=len(rr1d_mem) <= 20):
+                    df = pd.DataFrame(rr1d_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if br1d:
+                st.error(f"{len(br1d)} faltantes en resultados 1D")
+        else:
+            st.info("Sin resultados 1D.")
+
+        # ── Resultados Malla ──
+        if rrm:
+            rrm_load = [r for r in rrm if r[2] in ("Caso Carga","Combinacion")]
+            rrm_lc   = [r for r in rrm_load if r[2] == "Caso Carga"]
+            rrm_co   = [r for r in rrm_load if r[2] == "Combinacion"]
+            rrm_mem  = [r for r in rrm if r[3] == "Member"]
+            st.markdown(f"#### 🔺 Resultados Malla 2D — {len(seen_mesh)} pares panel/carga")
+
+            if rrm_lc:
+                with st.expander(f"🎯 Por Caso de Carga ({len(rrm_lc)})", expanded=True):
+                    df = pd.DataFrame(rrm_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if rrm_co:
+                with st.expander(f"🔀 Por Combinacion ({len(rrm_co)})", expanded=True):
+                    df = pd.DataFrame(rrm_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if rrm_mem:
+                with st.expander(f"🧩 Referencias a Superficies ({len(rrm_mem)})", expanded=len(rrm_mem) <= 20):
+                    df = pd.DataFrame(rrm_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+
+            if brm:
+                st.error(f"{len(brm)} faltantes en resultados malla")
+        else:
+            st.info("Sin resultados de malla 2D.")
+
+    # ─── TAB: ELEMENTOS ───
+    with tab_geo:
+        geo_groups = [
+            ("🔩 Barras", ["Barra"]),
+            ("🧩 Superficies", ["Superficie"]),
+            ("📌 Apoyos", ["Apoyo"]),
+            ("🧱 Secciones", ["Seccion"]),
+            ("📐 Regiones", ["Region"]),
+            ("🕳️ Aberturas", ["Abertura"]),
+        ]
+        for label, types in geo_groups:
+            subset = [r for r in refs if r[0] in types]
+            if subset:
+                with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
+                    df = pd.DataFrame(subset, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+
+    # ─── TAB: CARGAS Y ACCIONES ───
+    with tab_car:
+        car_groups = [
+            ("🔀 Combinaciones → Casos de Carga", ["Combinacion"]),
+            ("📍 Acciones Puntuales", ["Accion Puntual"]),
+            ("📏 Acciones Lineales", ["Accion Lineal"]),
+            ("🧩 Acciones Superficiales", ["Accion Superficial"]),
+        ]
+        for label, types in car_groups:
+            subset = [r for r in refs if r[0] in types]
+            if subset:
+                with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
+                    df = pd.DataFrame(subset, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+
+    # ─── TAB: FALTANTES ───
+    with tab_falt:
+        if not broken:
+            st.success("Todas las referencias son validas.")
+        else:
+            st.error(f"{len(broken)} referencias rotas o faltantes")
+            falt_groups = {}
+            for b in broken:
+                cat = b[0]; falt_groups.setdefault(cat, []).append(b)
+            for cat in sorted(falt_groups.keys()):
+                items = falt_groups[cat]
+                with st.expander(f"❌ {cat} ({len(items)})", expanded=True):
+                    df = pd.DataFrame(items, columns=["Origen","Nombre","Tipo Destino","Destino (ID)","Campo"])
+                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+
+    # ── TABLA COMPLETA ──
+    with st.expander("📋 Ver todas las referencias", expanded=False):
+        df_all = pd.DataFrame(refs, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
+        st.dataframe(df_all, use_container_width=True, hide_index=True)
+
+# ─────────────────────────────────────────────────
 # VALIDACION
 # ─────────────────────────────────────────────────
 def render_validation(data):
@@ -1056,10 +1280,10 @@ def render_validation(data):
         if sup.get("Node","") and sup.get("Node","") not in node_ids:
             issues.append(f"Apoyo '{sup.get('Name','')}' → nodo no existe")
     for a in data.get("CurveActions",[]):
-        if a.get("CurveMember","") and a.get("CurveMember","") not in bar_ids:
+        if a.get("Member",a.get("CurveMember","")) and a.get("Member",a.get("CurveMember","")) not in bar_ids:
             issues.append(f"Accion lineal '{a.get('Name','')}' → barra no existe")
     for a in data.get("SurfaceActions",[]):
-        if a.get("SurfaceElement","") and a.get("SurfaceElement","") not in surf_ids:
+        if a.get("Member","") and a.get("Member","") not in surf_ids:
             issues.append(f"Accion sup '{a.get('Name','')}' → superficie no existe")
 
     # Verificacion LCS geometrica
@@ -1083,14 +1307,12 @@ def render_validation(data):
 
     z1=sum(1 for r in data.get("Results1D",[]) if nz_ratio_1d(r)==0)
     if z1: warns.append(f"Results1D: {z1}/{len(data.get('Results1D',[]))} vacios")
-    zm=sum(1 for r in data.get("MeshResults",[]) if nz_ratio_mesh(r)==0)
-    if zm: warns.append(f"MeshResults: {zm}/{len(data.get('MeshResults',[]))} vacios")
+    zm=sum(1 for r in data.get("ResultsMeshes",[]) if nz_ratio_mesh(r)==0)
+    if zm: warns.append(f"ResultsMeshes: {zm}/{len(data.get('ResultsMeshes',[]))} vacios")
     no_cs=[b.get("Name","?") for b in data.get("CurveMembers",[]) if not b.get("CrossSection")]
     if no_cs: warns.append(f"{len(no_cs)} barras sin seccion")
-    no_thick=[s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Thickness") or s.get("Thickness",0)==0]
+    no_thick=[s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Thickness") or _num(s.get("Thickness",0))==0]
     if no_thick: warns.append(f"{len(no_thick)} superficies sin espesor")
-    non_planar=[s.get("Name","?") for s in data.get("SurfaceMembers",[]) if is_non_planar(s)]
-    if non_planar: warns.append(f"{len(non_planar)} superficies con geometría no plana (render solo aproximado)")
     empty_ents=[k for k,v in data.items() if isinstance(v,list) and len(v)==0]
     if empty_ents: warns.append(f"Entidades vacias: {', '.join(empty_ents)}")
 
@@ -1171,22 +1393,25 @@ uploaded=st.file_uploader("Cargar archivo JSAF (.json)",type=["json"])
 
 if uploaded:
     data=load_json(uploaded)
-    tabs=st.tabs(["📊 Resumen","🧱 Materiales","📐 Secciones","📍 Modelo 3D","🔩 Barras",
-                   "🧩 Superficies","📌 Apoyos","⚡ Cargas","🎯 Acciones",
-                   "📈 Results 1D","🔺 Malla 2D","🧭 LCS","✅ Validacion","🔍 JSON"])
+    tabs=st.tabs(["📊 Resumen","📍 Modelo 3D","🧱 Materiales","📐 Secciones",
+                   "🔩 Barras","🧩 Superficies","📌 Apoyos","🧭 LCS",
+                   "⚡ Cargas","🎯 Acciones",
+                   "📈 Results 1D","🔺 Malla 2D",
+                   "🔗 Referencias","✅ Validacion","🔍 JSON"])
     with tabs[0]:  render_overview(data)
-    with tabs[1]:  render_materials(data)
-    with tabs[2]:  render_cross_sections(data)
-    with tabs[3]:  render_3d_model(data)
+    with tabs[1]:  render_3d_model(data)
+    with tabs[2]:  render_materials(data)
+    with tabs[3]:  render_cross_sections(data)
     with tabs[4]:  render_bars(data)
     with tabs[5]:  render_surfaces(data)
     with tabs[6]:  render_supports(data)
-    with tabs[7]:  render_loads(data)
-    with tabs[8]:  render_actions(data)
-    with tabs[9]:  render_results_1d(data)
-    with tabs[10]: render_mesh_results(data)
-    with tabs[11]: render_lcs_global(data)
-    with tabs[12]: render_validation(data)
-    with tabs[13]: render_raw_json(data)
+    with tabs[7]:  render_lcs_global(data)
+    with tabs[8]:  render_loads(data)
+    with tabs[9]:  render_actions(data)
+    with tabs[10]: render_results_1d(data)
+    with tabs[11]: render_mesh_results(data)
+    with tabs[12]: render_references(data)
+    with tabs[13]: render_validation(data)
+    with tabs[14]: render_raw_json(data)
 else:
     st.info("Sube un archivo JSAF (.json) para comenzar.")
