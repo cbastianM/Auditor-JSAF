@@ -308,8 +308,10 @@ def point_in_polygon_2d(px,py,polygon):
 # ─────────────────────────────────────────────────
 # TRAZAS LCS EN 3D — solo OK/Error por elemento
 # ─────────────────────────────────────────────────
-def add_lcs_traces_surfaces(fig, data, nm, scale):
+def add_lcs_traces_surfaces(fig, data, nm, scale, visible_types=None):
     for surf in data.get("SurfaceMembers", []):
+        if visible_types is not None and surf.get("Type",0) not in visible_types:
+            continue
         lcs = compute_surface_lcs(surf, nm)
         if not lcs:
             continue
@@ -542,7 +544,7 @@ def _surface_mesh_geometry(mesh, surf, nm):
     return global_points,triangles
 
 
-def add_finite_element_meshes(fig, data, nm):
+def add_finite_element_meshes(fig, data, nm, visible_types=None):
     """Dibuja SurfaceMeshes con triangulos, separando losas y muros."""
     surfaces={s.get("Id"):s for s in data.get("SurfaceMembers",[]) if s.get("Id")}
     mesh_surface_map=_mesh_surface_map(data)
@@ -556,6 +558,8 @@ def add_finite_element_meshes(fig, data, nm):
             continue
         points,triangles=geometry
         stype=surf.get("Type",0)
+        if visible_types is not None and stype not in visible_types:
+            continue
         if stype not in groups:
             groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"edges":set()}
         group=groups[stype]; offset=len(group["x"])
@@ -567,10 +571,10 @@ def add_finite_element_meshes(fig, data, nm):
                 group["edges"].add(tuple(sorted((offset+e1,offset+e2))))
         rendered.add(sid)
 
-    colors={0:("Losas FE","rgba(100,180,255,0.55)","rgba(100,180,255,0.95)"),
-            1:("Muros FE","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)"),
-            2:("Muros FE (Shell)","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)"),
-            3:("Losas nervadas FE","rgba(100,200,190,0.55)","rgba(100,220,210,0.95)")}
+    colors={0:("Losas FE","rgba(70,130,255,0.45)","rgba(0,80,255,0.95)"),
+            1:("Muros FE","rgba(255,70,50,0.45)","rgba(235,0,0,0.95)"),
+            2:("Muros FE (Shell)","rgba(255,70,50,0.45)","rgba(235,0,0,0.95)"),
+            3:("Losas nervadas FE","rgba(30,190,180,0.45)","rgba(0,180,180,0.95)")}
     for stype,group in groups.items():
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
@@ -592,14 +596,19 @@ def render_3d_model(data):
     nm={n.get("Id"):n for n in nodes}
     sup_ids=set(s.get("Node","") for s in data.get("PointSupports",[]))
 
-    cc=st.columns(7)
+    cc=st.columns(8)
     show_nodes    =cc[0].checkbox("Nodos",False)
     show_sups     =cc[1].checkbox("Apoyos",True)
     show_cols     =cc[2].checkbox("Columnas",True)
     show_beams    =cc[3].checkbox("Vigas",True)
-    show_panels   =cc[4].checkbox("Paneles",True)
-    show_openings =cc[5].checkbox("Aberturas",True)
-    show_lcs      =cc[6].checkbox("LCS",False)
+    show_slabs    =cc[4].checkbox("Losas",True)
+    show_walls    =cc[5].checkbox("Muros",True)
+    show_openings =cc[6].checkbox("Aberturas",True)
+    show_lcs      =cc[7].checkbox("LCS",False)
+    visible_panel_types=set()
+    if show_slabs: visible_panel_types.update((0,3))
+    if show_walls: visible_panel_types.update((1,2))
+    show_panels=bool(visible_panel_types)
 
     if show_lcs:
         sc1,sc2=st.columns(2)
@@ -617,7 +626,7 @@ def render_3d_model(data):
         mesh_caption="Discretización geométrica — fuente: SurfaceMemberRegions (solo nodos y aristas del JSON)"
     else:
         mesh_caption="Superficies sin discretización explícita"
-    st.caption(f"{mesh_caption} | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
+    st.caption(f"{mesh_caption} | Azul: losas | Rojo: muros | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
 
     fig=go.Figure()
 
@@ -655,13 +664,15 @@ def render_3d_model(data):
             line=dict(color=cmap.get(bt,"#748ffc"),width=3),name=bt,connectgaps=False))
 
     if show_panels:
-        fe_surface_ids=add_finite_element_meshes(fig,data,nm)
+        fe_surface_ids=add_finite_element_meshes(fig,data,nm,visible_panel_types)
         # SurfaceMemberRegions no contiene caras trianguladas: se representan
         # solo sus nodos y aristas, tal como aparecen en el JSON.
         for stype,label,ecolor,node_color in [(0,"Losas discretizadas","rgba(0,80,255,0.95)","#0050ff"),
                                                (1,"Muros discretizados","rgba(235,0,0,0.95)","#ff0000"),
                                                (2,"Muros discretizados Shell","rgba(235,0,0,0.95)","#ff0000"),
                                                (3,"Losas nervadas discretizadas","rgba(0,180,180,0.95)","#00b8b8")]:
+            if stype not in visible_panel_types:
+                continue
             ex={"x":[],"y":[],"z":[]}
             mesh_edge_keys=set()
             mesh_node_keys=set()
@@ -705,9 +716,13 @@ def render_3d_model(data):
                         hovertemplate=f"<b>{label}</b><br>Nodo %{{text}}<extra></extra>",
                         name=f"Nodos {label}",showlegend=False))
 
-    if show_openings:
+    if show_openings and show_panels:
+        visible_surface_types={s.get("Id"):s.get("Type",0) for s in data.get("SurfaceMembers",[]) if s.get("Id")}
         ox,oy,oz=[],[],[]
         for op in data.get("SurfaceMemberOpenings",[]):
+            sid=op.get("Surface") or op.get("SurfaceMember")
+            if show_panels and sid and visible_surface_types.get(sid) not in visible_panel_types:
+                continue
             pts=[nm.get(nid) for nid in op.get("Nodes",[])]
             pts=[p for p in pts if p]
             if len(pts)<3: continue
@@ -718,7 +733,7 @@ def render_3d_model(data):
         if ox: fig.add_trace(go.Scatter3d(x=ox,y=oy,z=oz,mode='lines',line=dict(color="#ff0",width=3),name="Aberturas",connectgaps=False))
 
     if show_lcs:
-        add_lcs_traces_surfaces(fig, data, nm, lcs_scale_surf)
+        add_lcs_traces_surfaces(fig, data, nm, lcs_scale_surf, visible_panel_types)
         add_lcs_traces_bars(fig, data, nm, lcs_scale_bar)
 
     ng=dict(showgrid=False,showline=False,zeroline=False,showbackground=False)
