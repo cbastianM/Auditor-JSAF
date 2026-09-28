@@ -304,6 +304,61 @@ def point_in_polygon_2d(px,py,polygon):
         j=i
     return inside
 
+def _triangulate_surface(points_3d, openings_3d=None):
+    """Prepara caras internas para rellenar una superficie, sin dibujar malla."""
+    if len(points_3d)<3: return []
+    pts_2d=project_to_2d([(p["X"],p["Y"],p["Z"]) for p in points_3d])
+
+    def cross2(a,b,c):
+        return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+
+    def point_inside_triangle(p,a,b,c):
+        d1=cross2(p,a,b); d2=cross2(p,b,c); d3=cross2(p,c,a); eps=1e-12
+        return ((d1>eps and d2>eps and d3>eps) or
+                (d1<-eps and d2<-eps and d3<-eps))
+
+    # El primer y ultimo nodo suelen ser el mismo cierre del contorno.
+    idxs=[]
+    for idx in range(len(pts_2d)):
+        if not idxs or pts_2d[idx] != pts_2d[idxs[-1]]:
+            idxs.append(idx)
+    if len(idxs)>1 and pts_2d[idxs[0]] == pts_2d[idxs[-1]]:
+        idxs.pop()
+
+    # Quitar solo nodos colineales para que no bloqueen la triangulacion.
+    changed=True
+    while changed and len(idxs)>3:
+        changed=False
+        for pos in range(len(idxs)):
+            ai,bi,ci=idxs[pos-1],idxs[pos],idxs[(pos+1)%len(idxs)]
+            a,b,c=pts_2d[ai],pts_2d[bi],pts_2d[ci]
+            scale=max(math.hypot(b[0]-a[0],b[1]-a[1]) * math.hypot(c[0]-b[0],c[1]-b[1]),1.0)
+            if abs(cross2(a,b,c)) <= 1e-10*scale:
+                idxs.pop(pos); changed=True; break
+
+    triangles=[]; max_it=max(len(idxs)*3,1); poly_sign=None
+    while len(idxs)>2 and max_it>0:
+        max_it-=1; found=False; n=len(idxs)
+        if poly_sign is None:
+            area=sum(pts_2d[idxs[j]][0]*pts_2d[idxs[(j+1)%n]][1]-
+                     pts_2d[idxs[(j+1)%n]][0]*pts_2d[idxs[j]][1] for j in range(n))
+            if abs(area)<=1e-12: return []
+            poly_sign=1 if area>0 else -1
+        for i in range(n):
+            pi,ci,ni=idxs[(i-1)%n],idxs[i],idxs[(i+1)%n]
+            if cross2(pts_2d[pi],pts_2d[ci],pts_2d[ni])*poly_sign<=0: continue
+            if not any(point_inside_triangle(pts_2d[idxs[j]],pts_2d[pi],pts_2d[ci],pts_2d[ni])
+                       for j in range(n) if idxs[j] not in (pi,ci,ni)):
+                triangles.append((pi,ci,ni)); idxs.pop(i); found=True; break
+        if not found: break
+
+    if openings_3d:
+        openings_2d=[project_to_2d(op) for op in openings_3d]
+        triangles=[t for t in triangles if not any(point_in_polygon_2d(
+            (pts_2d[t[0]][0]+pts_2d[t[1]][0]+pts_2d[t[2]][0])/3,
+            (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op) for op in openings_2d)]
+    return triangles
+
 
 # ─────────────────────────────────────────────────
 # TRAZAS LCS EN 3D — solo OK/Error por elemento
@@ -561,14 +616,12 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         if visible_types is not None and stype not in visible_types:
             continue
         if stype not in groups:
-            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"edges":set()}
+            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
         group=groups[stype]; offset=len(group["x"])
         group["x"].extend(p[0] for p in points); group["y"].extend(p[1] for p in points); group["z"].extend(p[2] for p in points)
         for t in range(0,len(triangles),3):
             a,b,c=(triangles[t],triangles[t+1],triangles[t+2])
             group["i"].append(offset+a); group["j"].append(offset+b); group["k"].append(offset+c)
-            for e1,e2 in ((a,b),(b,c),(c,a)):
-                group["edges"].add(tuple(sorted((offset+e1,offset+e2))))
         rendered.add(sid)
 
     colors={0:("Losas FE","rgba(70,130,255,0.45)","rgba(0,80,255,0.95)"),
@@ -579,13 +632,7 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
             i=group["i"],j=group["j"],k=group["k"],color=face_color,
-            opacity=0.65,name=label,flatshading=True,showlegend=True))
-        ex=[]; ey=[]; ez=[]
-        for a,b in group["edges"]:
-            ex.extend([group["x"][a],group["x"][b],None]); ey.extend([group["y"][a],group["y"][b],None]); ez.extend([group["z"][a],group["z"][b],None])
-        if ex:
-            fig.add_trace(go.Scatter3d(x=ex,y=ey,z=ez,mode="lines",
-                line=dict(color=edge_color,width=1),name=f"Malla {label}",showlegend=False,connectgaps=False))
+            opacity=0.28,name=label,flatshading=True,showlegend=True))
     return rendered
 
 
@@ -621,9 +668,9 @@ def render_3d_model(data):
     fe_elements=_surface_fe_elements(data)
     fe_counts=Counter(s.get("Type",0) for s in fe_elements)
     if data.get("SurfaceMeshes"):
-        mesh_caption="Malla FE explícita — fuente: SurfaceMeshes"
+        mesh_caption="Superficies llenas — fuente: SurfaceMeshes"
     elif data.get("SurfaceMemberRegions"):
-        mesh_caption="Discretización geométrica — fuente: SurfaceMemberRegions (solo nodos y aristas del JSON)"
+        mesh_caption="Superficies llenas transparentes — fuente: SurfaceMemberRegions"
     else:
         mesh_caption="Superficies sin discretización explícita"
     st.caption(f"{mesh_caption} | Azul: losas | Rojo: muros | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
@@ -665,28 +712,26 @@ def render_3d_model(data):
 
     if show_panels:
         fe_surface_ids=add_finite_element_meshes(fig,data,nm,visible_panel_types)
-        # SurfaceMemberRegions no contiene caras trianguladas: se representan
-        # solo sus nodos y aristas, tal como aparecen en el JSON.
-        for stype,label,ecolor,node_color in [(0,"Losas discretizadas","rgba(0,80,255,0.95)","#0050ff"),
-                                               (1,"Muros discretizados","rgba(235,0,0,0.95)","#ff0000"),
-                                               (2,"Muros discretizados Shell","rgba(235,0,0,0.95)","#ff0000"),
-                                               (3,"Losas nervadas discretizadas","rgba(0,180,180,0.95)","#00b8b8")]:
+        opening_map={}
+        for op in data.get("SurfaceMemberOpenings",[]):
+            sid=op.get("Surface") or op.get("SurfaceMember")
+            pts_op=[nm.get(nid) for nid in op.get("Nodes",[])]
+            pts_op=[p for p in pts_op if p]
+            if sid and len(pts_op)>=3:
+                if pts_op[0]["Id"] != pts_op[-1]["Id"]:
+                    pts_op.append(pts_op[0])
+                opening_map.setdefault(sid,[]).append([(p["X"],p["Y"],p["Z"]) for p in pts_op[:-1]])
+
+        # Las regiones del JSON no traen caras: se triangulan solo de forma
+        # interna para que Plotly pueda rellenarlas, sin dibujar diagonales,
+        # nodos ni aristas de malla en el visor.
+        for stype,label,face_color in [(0,"Losas","rgba(70,130,255,0.45)"),
+                                       (1,"Muros","rgba(255,70,50,0.45)"),
+                                       (2,"Muros Shell","rgba(255,70,50,0.45)"),
+                                       (3,"Losas nervadas","rgba(30,190,180,0.45)")]:
             if stype not in visible_panel_types:
                 continue
-            ex={"x":[],"y":[],"z":[]}
-            mesh_edge_keys=set()
-            mesh_node_keys=set()
-            mesh_nodes={"x":[],"y":[],"z":[],"id":[]}
-
-            def add_mesh_edge(p1,p2):
-                key=tuple(sorted((tuple(round(p1[k],8) for k in ("X","Y","Z")),
-                                  tuple(round(p2[k],8) for k in ("X","Y","Z")))))
-                if key in mesh_edge_keys: return
-                mesh_edge_keys.add(key)
-                ex["x"].extend([p1["X"],p2["X"],None])
-                ex["y"].extend([p1["Y"],p2["Y"],None])
-                ex["z"].extend([p1["Z"],p2["Z"],None])
-
+            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
             for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
@@ -697,24 +742,15 @@ def render_3d_model(data):
                 if len(pts)<3: continue
                 if pts[0]["Id"] != pts[-1]["Id"]:
                     pts.append(pts[0])
-                for p in pts[:-1]:
-                    node_key=p.get("Id") or tuple(round(p[k],8) for k in ("X","Y","Z"))
-                    if node_key not in mesh_node_keys:
-                        mesh_node_keys.add(node_key)
-                        mesh_nodes["x"].append(p["X"]); mesh_nodes["y"].append(p["Y"]); mesh_nodes["z"].append(p["Z"])
-                        mesh_nodes["id"].append(p.get("Id", ""))
-                # Conservar todos los segmentos del contorno original,
-                # incluidos los nodos intermedios de los bordes del muro.
-                for ia in range(len(pts)-1):
-                    add_mesh_edge(pts[ia],pts[ia+1])
-            if ex["x"]:
-                fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],mode='lines',
-                    line=dict(color=ecolor,width=2),name=f"Malla {label} (JSON)",connectgaps=False,showlegend=True))
-                if mesh_nodes["x"]:
-                    fig.add_trace(go.Scatter3d(x=mesh_nodes["x"],y=mesh_nodes["y"],z=mesh_nodes["z"],mode='markers',
-                        marker=dict(size=2.5,color=node_color,opacity=0.95),text=mesh_nodes["id"],
-                        hovertemplate=f"<b>{label}</b><br>Nodo %{{text}}<extra></extra>",
-                        name=f"Nodos {label}",showlegend=False))
+                pts=pts[:-1]
+                off=len(mx["x"])
+                mx["x"].extend(p["X"] for p in pts); mx["y"].extend(p["Y"] for p in pts); mx["z"].extend(p["Z"] for p in pts)
+                for i0,i1,i2 in _triangulate_surface(pts,opening_map.get(source_sid)):
+                    mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
+            if mx["i"]:
+                fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
+                    color=face_color,opacity=0.28,name=label,flatshading=True,
+                    hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
 
     if show_openings and show_panels:
         visible_surface_types={s.get("Id"):s.get("Type",0) for s in data.get("SurfaceMembers",[]) if s.get("Id")}
