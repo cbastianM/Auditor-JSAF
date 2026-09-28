@@ -41,11 +41,14 @@ COMB_CATEGORY  = {0:"Undefined",1:"ULS",2:"SLS",3:"ALS",4:"National Std"}
 DISTRIBUTION   = {0:"Uniform",1:"Trapezoidal"}
 PLOT_COLORS    = ["#e94560","#4a9eff","#51cf66","#ffd43b","#cc5de8","#ff922b"]
 SURFACE_FACE_PALETTE = {
-    0: ["#4f7fe8","#6390f2","#77a1fb","#8db2ff"],
-    1: ["#dc4038","#ed5148","#f56258","#ff7970"],
-    2: ["#dc4038","#ed5148","#f56258","#ff7970"],
-    3: ["#159e9c","#22b2ae","#35c3bd","#55d2cb"],
+    0: ["#1683ff","#3494ff","#55a8ff","#78bcff"],
+    1: ["#ff2d20","#ff453a","#ff634f","#ff8266"],
+    2: ["#ff2d20","#ff453a","#ff634f","#ff8266"],
+    3: ["#00b8d9","#00c7c0","#35d7cf","#72e6dc"],
 }
+SURFACE_FILL_OPACITY = 0.34
+SURFACE_LIGHTING = dict(ambient=0.9,diffuse=0.35,specular=0.08,roughness=0.9,fresnel=0.12)
+SURFACE_LIGHT_POSITION = dict(x=120,y=80,z=180)
 
 SURFACE_LCS_TYPE = {0:"Default",1:"Eje X local = vector",2:"Eje Y local = vector"}
 CURVE_LCS_TYPE   = {0:"Eje Y = dir. vector",1:"Eje Z = dir. vector",2:"Eje Y apunta al punto",3:"Eje Z apunta al punto"}
@@ -646,7 +649,8 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
             i=group["i"],j=group["j"],k=group["k"],color=face_color,
-            facecolor=group["facecolor"],opacity=0.28,name=label,flatshading=True,showlegend=True))
+            facecolor=group["facecolor"],opacity=SURFACE_FILL_OPACITY,name=label,flatshading=True,
+            lighting=SURFACE_LIGHTING,lightposition=SURFACE_LIGHT_POSITION,showlegend=True))
     return rendered
 
 
@@ -765,7 +769,8 @@ def render_3d_model(data):
                     mx["facecolor"].append(face_color)
             if mx["i"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=face_color,facecolor=mx["facecolor"],opacity=0.28,name=label,flatshading=True,
+                    color=face_color,facecolor=mx["facecolor"],opacity=SURFACE_FILL_OPACITY,name=label,flatshading=True,
+                    lighting=SURFACE_LIGHTING,lightposition=SURFACE_LIGHT_POSITION,
                     hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
 
     if show_openings and show_panels:
