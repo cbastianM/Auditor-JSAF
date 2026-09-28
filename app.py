@@ -611,8 +611,13 @@ def render_3d_model(data):
 
     fe_elements=_surface_fe_elements(data)
     fe_counts=Counter(s.get("Type",0) for s in fe_elements)
-    fe_source="SurfaceMeshes" if data.get("SurfaceMeshes") else ("SurfaceMemberRegions" if data.get("SurfaceMemberRegions") else "SurfaceMembers")
-    st.caption(f"Malla FE reconocida — fuente: {fe_source} | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
+    if data.get("SurfaceMeshes"):
+        mesh_caption="Malla FE explícita — fuente: SurfaceMeshes"
+    elif data.get("SurfaceMemberRegions"):
+        mesh_caption="Discretización geométrica — fuente: SurfaceMemberRegions"
+    else:
+        mesh_caption="Superficies sin discretización explícita"
+    st.caption(f"{mesh_caption} | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
 
     fig=go.Figure()
 
@@ -719,12 +724,14 @@ def render_3d_model(data):
                     (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op2d) for op2d in ops2d)]
             return tris
 
-        for stype,label,color,ecolor in [(0,"Losas FE","rgba(100,180,255,0.60)","rgba(100,180,255,0.9)"),
-                                          (1,"Muros FE","rgba(255,160,80,0.70)","rgba(255,190,100,0.95)"),
-                                          (2,"Muros FE Shell","rgba(255,160,80,0.70)","rgba(255,190,100,0.95)"),
-                                          (3,"Losas nervadas FE","rgba(100,200,190,0.60)","rgba(100,220,210,0.9)")]:
+        for stype,label,color,ecolor,node_color in [(0,"Losas discretizadas","rgba(70,130,255,0.12)","rgba(0,80,255,0.95)","#0050ff"),
+                                                      (1,"Muros discretizados","rgba(255,70,50,0.12)","rgba(235,0,0,0.95)","#ff0000"),
+                                                      (2,"Muros discretizados Shell","rgba(255,70,50,0.12)","rgba(235,0,0,0.95)","#ff0000"),
+                                                      (3,"Losas nervadas discretizadas","rgba(30,190,180,0.12)","rgba(0,180,180,0.95)","#00b8b8")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
             mesh_edge_keys=set()
+            mesh_node_keys=set()
+            mesh_nodes={"x":[],"y":[],"z":[],"id":[]}
 
             def add_mesh_edge(p1,p2):
                 key=tuple(sorted((tuple(round(p1[k],8) for k in ("X","Y","Z")),
@@ -747,6 +754,12 @@ def render_3d_model(data):
                     pts.append(pts[0])
                 off=len(mx["x"])
                 for p in pts[:-1]: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
+                for p in pts[:-1]:
+                    node_key=p.get("Id") or tuple(round(p[k],8) for k in ("X","Y","Z"))
+                    if node_key not in mesh_node_keys:
+                        mesh_node_keys.add(node_key)
+                        mesh_nodes["x"].append(p["X"]); mesh_nodes["y"].append(p["Y"]); mesh_nodes["z"].append(p["Z"])
+                        mesh_nodes["id"].append(p.get("Id", ""))
                 # Conservar todos los segmentos del contorno original,
                 # incluidos los nodos intermedios de los bordes del muro.
                 for ia in range(len(pts)-1):
@@ -758,10 +771,15 @@ def render_3d_model(data):
                         add_mesh_edge(pts[ia],pts[ib])
             if mx["x"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=color,opacity=0.80,name=label,flatshading=True,
+                    color=color,opacity=0.18,name=label,flatshading=True,
                     hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
                 fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],mode='lines',
-                    line=dict(color=ecolor,width=1),name=f"Malla {label}",connectgaps=False,showlegend=False))
+                    line=dict(color=ecolor,width=2),name=f"Malla {label}",connectgaps=False,showlegend=False))
+                if mesh_nodes["x"]:
+                    fig.add_trace(go.Scatter3d(x=mesh_nodes["x"],y=mesh_nodes["y"],z=mesh_nodes["z"],mode='markers',
+                        marker=dict(size=2.5,color=node_color,opacity=0.95),text=mesh_nodes["id"],
+                        hovertemplate=f"<b>{label}</b><br>Nodo %{{text}}<extra></extra>",
+                        name=f"Nodos {label}",showlegend=False))
 
     if show_openings:
         ox,oy,oz=[],[],[]
