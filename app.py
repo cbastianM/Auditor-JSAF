@@ -40,6 +40,12 @@ LOAD_TYPE      = {0:"Self Weight",1:"Others",2:"Prestress",3:"Dynamic",4:"Static
 COMB_CATEGORY  = {0:"Undefined",1:"ULS",2:"SLS",3:"ALS",4:"National Std"}
 DISTRIBUTION   = {0:"Uniform",1:"Trapezoidal"}
 PLOT_COLORS    = ["#e94560","#4a9eff","#51cf66","#ffd43b","#cc5de8","#ff922b"]
+SURFACE_FACE_PALETTE = {
+    0: ["#4f7fe8","#6390f2","#77a1fb","#8db2ff"],
+    1: ["#dc4038","#ed5148","#f56258","#ff7970"],
+    2: ["#dc4038","#ed5148","#f56258","#ff7970"],
+    3: ["#159e9c","#22b2ae","#35c3bd","#55d2cb"],
+}
 
 SURFACE_LCS_TYPE = {0:"Default",1:"Eje X local = vector",2:"Eje Y local = vector"}
 CURVE_LCS_TYPE   = {0:"Eje Y = dir. vector",1:"Eje Z = dir. vector",2:"Eje Y apunta al punto",3:"Eje Z apunta al punto"}
@@ -66,6 +72,12 @@ def _norm(v):
 def _angle_deg(a,b):
     d=max(-1.0,min(1.0,_dot(_norm(a),_norm(b))))
     return math.degrees(math.acos(d))
+
+def _surface_face_color(stype, surface_id):
+    palette=SURFACE_FACE_PALETTE.get(stype, ["#9aa0a6"])
+    key=str(surface_id or "")
+    index=sum((i+1)*ord(ch) for i,ch in enumerate(key)) % len(palette)
+    return palette[index]
 
 
 # ─────────────────────────────────────────────────
@@ -616,12 +628,14 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         if visible_types is not None and stype not in visible_types:
             continue
         if stype not in groups:
-            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
+            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"facecolor":[]}
         group=groups[stype]; offset=len(group["x"])
         group["x"].extend(p[0] for p in points); group["y"].extend(p[1] for p in points); group["z"].extend(p[2] for p in points)
+        face_color=_surface_face_color(stype,sid)
         for t in range(0,len(triangles),3):
             a,b,c=(triangles[t],triangles[t+1],triangles[t+2])
             group["i"].append(offset+a); group["j"].append(offset+b); group["k"].append(offset+c)
+            group["facecolor"].append(face_color)
         rendered.add(sid)
 
     colors={0:("Losas FE","rgba(70,130,255,0.45)","rgba(0,80,255,0.95)"),
@@ -632,7 +646,7 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
             i=group["i"],j=group["j"],k=group["k"],color=face_color,
-            opacity=0.28,name=label,flatshading=True,showlegend=True))
+            facecolor=group["facecolor"],opacity=0.28,name=label,flatshading=True,showlegend=True))
     return rendered
 
 
@@ -731,7 +745,7 @@ def render_3d_model(data):
                                        (3,"Losas nervadas","rgba(30,190,180,0.45)")]:
             if stype not in visible_panel_types:
                 continue
-            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}
+            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"facecolor":[]}
             for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
@@ -745,11 +759,13 @@ def render_3d_model(data):
                 pts=pts[:-1]
                 off=len(mx["x"])
                 mx["x"].extend(p["X"] for p in pts); mx["y"].extend(p["Y"] for p in pts); mx["z"].extend(p["Z"] for p in pts)
+                face_color=_surface_face_color(stype,source_sid)
                 for i0,i1,i2 in _triangulate_surface(pts,opening_map.get(source_sid)):
                     mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
+                    mx["facecolor"].append(face_color)
             if mx["i"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=face_color,opacity=0.28,name=label,flatshading=True,
+                    color=face_color,facecolor=mx["facecolor"],opacity=0.28,name=label,flatshading=True,
                     hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
 
     if show_openings and show_panels:
