@@ -40,15 +40,6 @@ LOAD_TYPE      = {0:"Self Weight",1:"Others",2:"Prestress",3:"Dynamic",4:"Static
 COMB_CATEGORY  = {0:"Undefined",1:"ULS",2:"SLS",3:"ALS",4:"National Std"}
 DISTRIBUTION   = {0:"Uniform",1:"Trapezoidal"}
 PLOT_COLORS    = ["#e94560","#4a9eff","#51cf66","#ffd43b","#cc5de8","#ff922b"]
-SURFACE_FACE_PALETTE = {
-    0: ["#1683ff","#3494ff","#55a8ff","#78bcff"],
-    1: ["#ff2d20","#ff453a","#ff634f","#ff8266"],
-    2: ["#ff2d20","#ff453a","#ff634f","#ff8266"],
-    3: ["#00b8d9","#00c7c0","#35d7cf","#72e6dc"],
-}
-SURFACE_FILL_OPACITY = 0.34
-SURFACE_LIGHTING = dict(ambient=0.9,diffuse=0.35,specular=0.08,roughness=0.9,fresnel=0.12)
-SURFACE_LIGHT_POSITION = dict(x=120,y=80,z=180)
 
 SURFACE_LCS_TYPE = {0:"Default",1:"Eje X local = vector",2:"Eje Y local = vector"}
 CURVE_LCS_TYPE   = {0:"Eje Y = dir. vector",1:"Eje Z = dir. vector",2:"Eje Y apunta al punto",3:"Eje Z apunta al punto"}
@@ -75,13 +66,6 @@ def _norm(v):
 def _angle_deg(a,b):
     d=max(-1.0,min(1.0,_dot(_norm(a),_norm(b))))
     return math.degrees(math.acos(d))
-
-def _surface_face_color(stype, surface_id):
-    palette=SURFACE_FACE_PALETTE.get(stype, ["#9aa0a6"])
-    key=str(surface_id or "")
-    index=sum((i+1)*ord(ch) for i,ch in enumerate(key)) % len(palette)
-    return palette[index]
-
 
 # ─────────────────────────────────────────────────
 # CALCULO LCS DESDE GEOMETRIA
@@ -631,26 +615,31 @@ def add_finite_element_meshes(fig, data, nm, visible_types=None):
         if visible_types is not None and stype not in visible_types:
             continue
         if stype not in groups:
-            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"facecolor":[]}
+            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"edges":set()}
         group=groups[stype]; offset=len(group["x"])
         group["x"].extend(p[0] for p in points); group["y"].extend(p[1] for p in points); group["z"].extend(p[2] for p in points)
-        face_color=_surface_face_color(stype,sid)
         for t in range(0,len(triangles),3):
             a,b,c=(triangles[t],triangles[t+1],triangles[t+2])
             group["i"].append(offset+a); group["j"].append(offset+b); group["k"].append(offset+c)
-            group["facecolor"].append(face_color)
+            for e1,e2 in ((a,b),(b,c),(c,a)):
+                group["edges"].add(tuple(sorted((offset+e1,offset+e2))))
         rendered.add(sid)
 
-    colors={0:("Losas FE","rgba(70,130,255,0.45)","rgba(0,80,255,0.95)"),
-            1:("Muros FE","rgba(255,70,50,0.45)","rgba(235,0,0,0.95)"),
-            2:("Muros FE (Shell)","rgba(255,70,50,0.45)","rgba(235,0,0,0.95)"),
-            3:("Losas nervadas FE","rgba(30,190,180,0.45)","rgba(0,180,180,0.95)")}
+    colors={0:("Losas FE","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
+            1:("Muros FE","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+            2:("Muros FE (Shell)","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+            3:("Losas nervadas FE","rgba(100,200,190,0.55)","rgba(100,220,210,0.8)")}
     for stype,group in groups.items():
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
             i=group["i"],j=group["j"],k=group["k"],color=face_color,
-            facecolor=group["facecolor"],opacity=SURFACE_FILL_OPACITY,name=label,flatshading=True,
-            lighting=SURFACE_LIGHTING,lightposition=SURFACE_LIGHT_POSITION,showlegend=True))
+            opacity=0.55,name=label,flatshading=True,showlegend=True))
+        ex=[]; ey=[]; ez=[]
+        for a,b in group["edges"]:
+            ex.extend([group["x"][a],group["x"][b],None]); ey.extend([group["y"][a],group["y"][b],None]); ez.extend([group["z"][a],group["z"][b],None])
+        if ex:
+            fig.add_trace(go.Scatter3d(x=ex,y=ey,z=ez,mode="lines",
+                line=dict(color=edge_color,width=1),name=f"Bordes {label}",showlegend=False,connectgaps=False))
     return rendered
 
 
@@ -740,16 +729,15 @@ def render_3d_model(data):
                     pts_op.append(pts_op[0])
                 opening_map.setdefault(sid,[]).append([(p["X"],p["Y"],p["Z"]) for p in pts_op[:-1]])
 
-        # Las regiones del JSON no traen caras: se triangulan solo de forma
-        # interna para que Plotly pueda rellenarlas, sin dibujar diagonales,
-        # nodos ni aristas de malla en el visor.
-        for stype,label,face_color in [(0,"Losas","rgba(70,130,255,0.45)"),
-                                       (1,"Muros","rgba(255,70,50,0.45)"),
-                                       (2,"Muros Shell","rgba(255,70,50,0.45)"),
-                                       (3,"Losas nervadas","rgba(30,190,180,0.45)")]:
+        # Estilo original: superficies transparentes y bordes de cada panel,
+        # sin diagonales internas ni nodos adicionales de la malla.
+        for stype,label,face_color,edge_color in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
+                                                   (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+                                                   (2,"Muros Shell","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+                                                   (3,"Losas nervadas","rgba(100,200,190,0.55)","rgba(100,220,210,0.8)")]:
             if stype not in visible_panel_types:
                 continue
-            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"facecolor":[]}
+            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex=[]; ey=[]; ez=[]
             for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
@@ -763,15 +751,18 @@ def render_3d_model(data):
                 pts=pts[:-1]
                 off=len(mx["x"])
                 mx["x"].extend(p["X"] for p in pts); mx["y"].extend(p["Y"] for p in pts); mx["z"].extend(p["Z"] for p in pts)
-                face_color=_surface_face_color(stype,source_sid)
                 for i0,i1,i2 in _triangulate_surface(pts,opening_map.get(source_sid)):
                     mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
-                    mx["facecolor"].append(face_color)
+                for p in pts:
+                    ex.append(p["X"]); ey.append(p["Y"]); ez.append(p["Z"])
+                ex.extend([pts[0]["X"],None]); ey.extend([pts[0]["Y"],None]); ez.extend([pts[0]["Z"],None])
             if mx["i"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=face_color,facecolor=mx["facecolor"],opacity=SURFACE_FILL_OPACITY,name=label,flatshading=True,
-                    lighting=SURFACE_LIGHTING,lightposition=SURFACE_LIGHT_POSITION,
+                    color=face_color,opacity=0.55,name=label,flatshading=True,
                     hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
+                if ex:
+                    fig.add_trace(go.Scatter3d(x=ex,y=ey,z=ez,mode="lines",
+                        line=dict(color=edge_color,width=2),name=f"Bordes {label}",connectgaps=False,showlegend=False))
 
     if show_openings and show_panels:
         visible_surface_types={s.get("Id"):s.get("Type",0) for s in data.get("SurfaceMembers",[]) if s.get("Id")}
