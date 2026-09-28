@@ -650,15 +650,16 @@ def render_3d_model(data):
     nm={n.get("Id"):n for n in nodes}
     sup_ids=set(s.get("Node","") for s in data.get("PointSupports",[]))
 
-    cc=st.columns(8)
+    cc=st.columns(9)
     show_nodes    =cc[0].checkbox("Nodos",False)
     show_sups     =cc[1].checkbox("Apoyos",True)
     show_cols     =cc[2].checkbox("Columnas",True)
     show_beams    =cc[3].checkbox("Vigas",True)
     show_slabs    =cc[4].checkbox("Losas",True)
     show_walls    =cc[5].checkbox("Muros",True)
-    show_openings =cc[6].checkbox("Aberturas",True)
-    show_lcs      =cc[7].checkbox("LCS",False)
+    show_fem      =cc[6].checkbox("FEM",False)
+    show_openings =cc[7].checkbox("Aberturas",True)
+    show_lcs      =cc[8].checkbox("LCS",False)
     visible_panel_types=set()
     if show_slabs: visible_panel_types.update((0,3))
     if show_walls: visible_panel_types.update((1,2))
@@ -674,10 +675,14 @@ def render_3d_model(data):
 
     fe_elements=_surface_fe_elements(data)
     fe_counts=Counter(s.get("Type",0) for s in fe_elements)
-    if data.get("SurfaceMeshes"):
-        mesh_caption="Superficies llenas — fuente: SurfaceMeshes"
-    elif data.get("SurfaceMemberRegions"):
-        mesh_caption="Superficies llenas transparentes — fuente: SurfaceMemberRegions"
+    if show_fem and data.get("SurfaceMeshes"):
+        mesh_caption="Modo FEM — fuente: SurfaceMeshes"
+    elif show_fem and data.get("SurfaceMemberRegions"):
+        mesh_caption="Modo FEM — fuente: SurfaceMemberRegions"
+    elif show_fem:
+        mesh_caption="Modo FEM — el archivo no contiene malla FEM explícita"
+    elif data.get("SurfaceMembers"):
+        mesh_caption="Modo superficies estructurales"
     else:
         mesh_caption="Superficies sin discretización explícita"
     st.caption(f"{mesh_caption} | Azul: losas | Rojo: muros | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
@@ -718,7 +723,12 @@ def render_3d_model(data):
             line=dict(color=cmap.get(bt,"#748ffc"),width=3),name=bt,connectgaps=False))
 
     if show_panels:
-        fe_surface_ids=add_finite_element_meshes(fig,data,nm,visible_panel_types)
+        if show_fem:
+            display_elements=fe_elements
+            fe_surface_ids=add_finite_element_meshes(fig,data,nm,visible_panel_types)
+        else:
+            display_elements=data.get("SurfaceMembers") or []
+            fe_surface_ids=set()
         opening_map={}
         for op in data.get("SurfaceMemberOpenings",[]):
             sid=op.get("Surface") or op.get("SurfaceMember")
@@ -738,7 +748,7 @@ def render_3d_model(data):
             if stype not in visible_panel_types:
                 continue
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex=[]; ey=[]; ez=[]
-            for surf in fe_elements:
+            for surf in display_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
                 source_sid=surf.get("_SurfaceMemberId",sid)
