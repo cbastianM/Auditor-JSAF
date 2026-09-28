@@ -614,7 +614,7 @@ def render_3d_model(data):
     if data.get("SurfaceMeshes"):
         mesh_caption="Malla FE explícita — fuente: SurfaceMeshes"
     elif data.get("SurfaceMemberRegions"):
-        mesh_caption="Discretización geométrica — fuente: SurfaceMemberRegions"
+        mesh_caption="Discretización geométrica — fuente: SurfaceMemberRegions (solo nodos y aristas del JSON)"
     else:
         mesh_caption="Superficies sin discretización explícita"
     st.caption(f"{mesh_caption} | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
@@ -656,79 +656,13 @@ def render_3d_model(data):
 
     if show_panels:
         fe_surface_ids=add_finite_element_meshes(fig,data,nm)
-        opening_map={}
-        for op in data.get("SurfaceMemberOpenings",[]):
-            sid=op.get("Surface","")
-            pts_op=[nm.get(nid) for nid in op.get("Nodes",[])]
-            pts_op=[p for p in pts_op if p]
-            if len(pts_op)>=3:
-                if pts_op[0]["Id"] != pts_op[-1]["Id"]:
-                    pts_op.append(pts_op[0])
-                if sid not in opening_map: opening_map[sid]=[]
-                opening_map[sid].append([(p["X"],p["Y"],p["Z"]) for p in pts_op])
-
-        def pit(p,a,b,c):
-            def sign(p1,p2,p3): return (p1[0]-p3[0])*(p2[1]-p3[1])-(p2[0]-p3[0])*(p1[1]-p3[1])
-            d1,d2,d3=sign(p,a,b),sign(p,b,c),sign(p,c,a)
-            # Un nodo colineal sobre el borde de la oreja no debe bloquearla.
-            # Se considera interior solo cuando los tres signos son estrictos.
-            eps=1e-12
-            return ((d1>eps and d2>eps and d3>eps) or
-                    (d1<-eps and d2<-eps and d3<-eps))
-
-        def triangulate(pts_3d, openings_3d=None):
-            if len(pts_3d)<3: return []
-            pts_2d=project_to_2d([(p["X"],p["Y"],p["Z"]) for p in pts_3d])
-            # Los muros exportados pueden traer muchos nodos colineales sobre
-            # un mismo borde.  El algoritmo de orejas los interpretaba como
-            # puntos dentro de cada triangulo y no encontraba ninguna oreja.
-            # Simplificamos solo para triangular; las aristas originales se
-            # conservan despues para que la malla siga mostrando sus nodos.
-            def cross2(a,b,c):
-                return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
-            idxs=[]
-            for idx in range(len(pts_2d)):
-                if not idxs or pts_2d[idx] != pts_2d[idxs[-1]]:
-                    idxs.append(idx)
-            if len(idxs)>1 and pts_2d[idxs[0]] == pts_2d[idxs[-1]]:
-                idxs.pop()
-            changed=True
-            while changed and len(idxs)>3:
-                changed=False
-                for pos in range(len(idxs)):
-                    ai,bi,ci=idxs[pos-1],idxs[pos],idxs[(pos+1)%len(idxs)]
-                    a,b,c=pts_2d[ai],pts_2d[bi],pts_2d[ci]
-                    scale=max(math.hypot(b[0]-a[0],b[1]-a[1]) * math.hypot(c[0]-b[0],c[1]-b[1]),1.0)
-                    if abs(cross2(a,b,c)) <= 1e-10*scale:
-                        idxs.pop(pos)
-                        changed=True
-                        break
-            tris=[]; poly_sign=None; max_it=len(idxs)*3
-            while len(idxs)>2 and max_it>0:
-                max_it-=1; found=False; n=len(idxs)
-                if poly_sign is None:
-                    area=sum((pts_2d[idxs[j]][0]*pts_2d[idxs[(j+1)%n]][1]-pts_2d[idxs[(j+1)%n]][0]*pts_2d[idxs[j]][1]) for j in range(n))
-                    if abs(area)<=1e-12: return []
-                    poly_sign=1 if area>0 else -1
-                for i in range(n):
-                    pi,ci,ni=idxs[(i-1)%n],idxs[i],idxs[(i+1)%n]
-                    ax,ay=pts_2d[pi]; bx,by=pts_2d[ci]; cx,cy=pts_2d[ni]
-                    if ((bx-ax)*(cy-ay)-(by-ay)*(cx-ax))*poly_sign<=0: continue
-                    if not any(pit(pts_2d[idxs[j]],pts_2d[pi],pts_2d[ci],pts_2d[ni]) for j in range(n) if idxs[j] not in (pi,ci,ni)):
-                        tris.append((pi,ci,ni)); idxs.pop(i); found=True; break
-                if not found: break
-            if openings_3d:
-                ops2d=[project_to_2d(op) for op in openings_3d]
-                tris=[t for t in tris if not any(point_in_polygon_2d(
-                    (pts_2d[t[0]][0]+pts_2d[t[1]][0]+pts_2d[t[2]][0])/3,
-                    (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op2d) for op2d in ops2d)]
-            return tris
-
-        for stype,label,color,ecolor,node_color in [(0,"Losas discretizadas","rgba(70,130,255,0.12)","rgba(0,80,255,0.95)","#0050ff"),
-                                                      (1,"Muros discretizados","rgba(255,70,50,0.12)","rgba(235,0,0,0.95)","#ff0000"),
-                                                      (2,"Muros discretizados Shell","rgba(255,70,50,0.12)","rgba(235,0,0,0.95)","#ff0000"),
-                                                      (3,"Losas nervadas discretizadas","rgba(30,190,180,0.12)","rgba(0,180,180,0.95)","#00b8b8")]:
-            mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
+        # SurfaceMemberRegions no contiene caras trianguladas: se representan
+        # solo sus nodos y aristas, tal como aparecen en el JSON.
+        for stype,label,ecolor,node_color in [(0,"Losas discretizadas","rgba(0,80,255,0.95)","#0050ff"),
+                                               (1,"Muros discretizados","rgba(235,0,0,0.95)","#ff0000"),
+                                               (2,"Muros discretizados Shell","rgba(235,0,0,0.95)","#ff0000"),
+                                               (3,"Losas nervadas discretizadas","rgba(0,180,180,0.95)","#00b8b8")]:
+            ex={"x":[],"y":[],"z":[]}
             mesh_edge_keys=set()
             mesh_node_keys=set()
             mesh_nodes={"x":[],"y":[],"z":[],"id":[]}
@@ -752,8 +686,6 @@ def render_3d_model(data):
                 if len(pts)<3: continue
                 if pts[0]["Id"] != pts[-1]["Id"]:
                     pts.append(pts[0])
-                off=len(mx["x"])
-                for p in pts[:-1]: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
                 for p in pts[:-1]:
                     node_key=p.get("Id") or tuple(round(p[k],8) for k in ("X","Y","Z"))
                     if node_key not in mesh_node_keys:
@@ -764,17 +696,9 @@ def render_3d_model(data):
                 # incluidos los nodos intermedios de los bordes del muro.
                 for ia in range(len(pts)-1):
                     add_mesh_edge(pts[ia],pts[ia+1])
-                triangles=triangulate(pts[:-1], opening_map.get(source_sid))
-                for i0,i1,i2 in triangles:
-                    mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
-                    for ia,ib in ((i0,i1),(i1,i2),(i2,i0)):
-                        add_mesh_edge(pts[ia],pts[ib])
-            if mx["x"]:
-                fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=color,opacity=0.18,name=label,flatshading=True,
-                    hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
+            if ex["x"]:
                 fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],mode='lines',
-                    line=dict(color=ecolor,width=2),name=f"Malla {label}",connectgaps=False,showlegend=False))
+                    line=dict(color=ecolor,width=2),name=f"Malla {label} (JSON)",connectgaps=False,showlegend=True))
                 if mesh_nodes["x"]:
                     fig.add_trace(go.Scatter3d(x=mesh_nodes["x"],y=mesh_nodes["y"],z=mesh_nodes["z"],mode='markers',
                         marker=dict(size=2.5,color=node_color,opacity=0.95),text=mesh_nodes["id"],
