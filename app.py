@@ -515,10 +515,11 @@ def _surface_mesh_geometry(mesh, surf, nm):
 def add_finite_element_meshes(fig, data, nm):
     """Dibuja SurfaceMeshes con triangulos, separando losas y muros."""
     surfaces={s.get("Id"):s for s in data.get("SurfaceMembers",[]) if s.get("Id")}
+    mesh_surface_map=_mesh_surface_map(data)
     groups={}
     rendered=set()
     for mesh in data.get("SurfaceMeshes") or []:
-        sid=mesh.get("SurfaceMember")
+        sid=mesh.get("SurfaceMember") or mesh.get("Surface") or mesh.get("Member") or mesh_surface_map.get(mesh.get("Id"))
         surf=surfaces.get(sid)
         geometry=_surface_mesh_geometry(mesh,surf,nm)
         if not surf or not geometry:
@@ -537,7 +538,9 @@ def add_finite_element_meshes(fig, data, nm):
         rendered.add(sid)
 
     colors={0:("Losas FE","rgba(100,180,255,0.55)","rgba(100,180,255,0.95)"),
-            1:("Muros FE","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)")}
+            1:("Muros FE","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)"),
+            2:("Muros FE (Shell)","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)"),
+            3:("Losas nervadas FE","rgba(100,200,190,0.55)","rgba(100,220,210,0.95)")}
     for stype,group in groups.items():
         label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
         fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
@@ -653,7 +656,9 @@ def render_3d_model(data):
             return tris
 
         for stype,label,color,ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
-                                          (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)")]:
+                                          (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+                                          (2,"Muros Shell","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
+                                          (3,"Losas nervadas","rgba(100,200,190,0.55)","rgba(100,200,190,0.8)")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
             for surf in data.get("SurfaceMembers",[]):
                 if surf.get("Type",0)!=stype: continue
