@@ -204,6 +204,28 @@ def _mesh_surface_map(data):
                 mapping[mesh_id]=base_id
     return mapping
 
+def _surface_fe_elements(data):
+    """Obtiene los elementos FE de exportaciones sin SurfaceMeshes explicitas."""
+    parents={s.get("Id"):s for s in (data.get("SurfaceMembers") or []) if s.get("Id")}
+    regions=data.get("SurfaceMemberRegions") or []
+    if not regions:
+        return list(parents.values())
+    elements=[]; represented=set()
+    for region in regions:
+        parent_id=region.get("SurfaceMember") or region.get("Surface")
+        parent=parents.get(parent_id)
+        if not parent:
+            continue
+        element=dict(parent)
+        element.update(region)
+        element["Type"]=parent.get("Type",0)
+        element["_SurfaceMemberId"]=parent_id
+        elements.append(element)
+        represented.add(parent_id)
+    # No perder superficies validas si la exportacion trae regiones incompletas.
+    elements.extend(parent for sid,parent in parents.items() if sid not in represented)
+    return elements or list(parents.values())
+
 def _get_dp(obj, label):
     for dp in (obj.get("DesignProperties") or []):
         if dp.get("Label") == label:
@@ -616,6 +638,7 @@ def render_3d_model(data):
 
     if show_panels:
         fe_surface_ids=add_finite_element_meshes(fig,data,nm)
+        fe_elements=_surface_fe_elements(data)
         opening_map={}
         for op in data.get("SurfaceMemberOpenings",[]):
             sid=op.get("Surface","")
@@ -660,10 +683,11 @@ def render_3d_model(data):
                                           (2,"Muros Shell","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
                                           (3,"Losas nervadas","rgba(100,200,190,0.55)","rgba(100,200,190,0.8)")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
-            for surf in data.get("SurfaceMembers",[]):
+            for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
-                if sid in fe_surface_ids: continue
+                source_sid=surf.get("_SurfaceMemberId",sid)
+                if source_sid in fe_surface_ids: continue
                 pts=[nm.get(nid) for nid in surf.get("Nodes",[])]
                 pts=[p for p in pts if p]
                 if len(pts)<3: continue
@@ -671,7 +695,7 @@ def render_3d_model(data):
                     pts.append(pts[0])
                 off=len(mx["x"])
                 for p in pts[:-1]: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
-                for i0,i1,i2 in triangulate(pts[:-1], opening_map.get(sid)):
+                for i0,i1,i2 in triangulate(pts[:-1], opening_map.get(source_sid)):
                     mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
                 for p in pts: ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
                 ex["x"].extend([pts[0]["X"],None]); ex["y"].extend([pts[0]["Y"],None]); ex["z"].extend([pts[0]["Z"],None])
