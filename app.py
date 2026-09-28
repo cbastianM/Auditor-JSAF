@@ -178,6 +178,14 @@ def _num(v):
     try: return float(v)
     except (ValueError,TypeError): return 0.0
 
+def _as_list(value):
+    """Normaliza campos de coleccion opcionales del JSON JSAF."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return value
+    return [value]
+
 def _get_dp(obj, label):
     for dp in (obj.get("DesignProperties") or []):
         if dp.get("Label") == label:
@@ -369,8 +377,8 @@ def render_cross_sections(data):
     rows=[{"Nombre":s.get("Name",""),
            "Tipo":CS_TYPE.get(s.get("CrossSectionType",s.get("Type",-1)),"?"),
            "Forma":CS_SHAPE.get(s.get("Shape",-1),str(s.get("Shape",-1))),
-           "Parametros (m)":", ".join(f"{_num(p):.3f}" for p in s.get("Parameters",[])),
-           "Material":", ".join(mm.get(mid,mid[:8]) for mid in s.get("Materials",[]))} for s in secs]
+           "Parametros (m)":", ".join(f"{_num(p):.3f}" for p in _as_list(s.get("Parameters"))) or "—",
+           "Material":", ".join(mm.get(mid, str(mid)[:8]) for mid in _as_list(s.get("Materials")))} for s in secs]
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
