@@ -272,17 +272,25 @@ def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
 
 def project_to_2d(points_3d):
     if len(points_3d)<3: return [(p[0],p[1]) for p in points_3d]
-    # No asumir que los tres primeros nodos forman un triangulo:
-    # en muros es frecuente que sean colineales en el mismo borde.
-    p0=points_3d[0]; normal=(0.0,0.0,0.0)
-    for i in range(1,len(points_3d)-1):
-        v1=_sub(points_3d[i],p0)
-        if _mag(v1)<=1e-12: continue
-        for j in range(i+1,len(points_3d)):
-            v2=_sub(points_3d[j],p0)
-            normal=_cross(v1,v2)
-            if _mag(normal)>1e-12: break
-        if _mag(normal)>1e-12: break
+    # Usar la normal del contorno completo evita que una pequena perturbacion
+    # numerica en Y haga que un muro X-Z se proyecte accidentalmente en X-Y.
+    # Newell es estable aunque los primeros nodos sean colineales.
+    normal=[0.0,0.0,0.0]
+    for p,q in zip(points_3d,points_3d[1:]+points_3d[:1]):
+        normal[0]+=(p[1]-q[1])*(p[2]+q[2])
+        normal[1]+=(p[2]-q[2])*(p[0]+q[0])
+        normal[2]+=(p[0]-q[0])*(p[1]+q[1])
+    if _mag(normal)<=1e-10:
+        # Fallback para contornos degenerados o exportaciones sin orden
+        # topologico confiable: elegir el producto cruz de mayor magnitud.
+        p0=points_3d[0]; normal=(0.0,0.0,0.0); best=0.0
+        for i in range(1,len(points_3d)-1):
+            v1=_sub(points_3d[i],p0)
+            for j in range(i+1,len(points_3d)):
+                candidate=_cross(v1,_sub(points_3d[j],p0))
+                magnitude=_mag(candidate)
+                if magnitude>best:
+                    normal,best=candidate,magnitude
     nx,ny,nz=abs(normal[0]),abs(normal[1]),abs(normal[2])
     if nz>=nx and nz>=ny: return [(p[0],p[1]) for p in points_3d]
     elif ny>=nx:           return [(p[0],p[2]) for p in points_3d]
@@ -657,16 +665,45 @@ def render_3d_model(data):
         def pit(p,a,b,c):
             def sign(p1,p2,p3): return (p1[0]-p3[0])*(p2[1]-p3[1])-(p2[0]-p3[0])*(p1[1]-p3[1])
             d1,d2,d3=sign(p,a,b),sign(p,b,c),sign(p,c,a)
-            return not((d1<0 or d2<0 or d3<0) and (d1>0 or d2>0 or d3>0))
+            # Un nodo colineal sobre el borde de la oreja no debe bloquearla.
+            # Se considera interior solo cuando los tres signos son estrictos.
+            eps=1e-12
+            return ((d1>eps and d2>eps and d3>eps) or
+                    (d1<-eps and d2<-eps and d3<-eps))
 
         def triangulate(pts_3d, openings_3d=None):
             if len(pts_3d)<3: return []
             pts_2d=project_to_2d([(p["X"],p["Y"],p["Z"]) for p in pts_3d])
-            tris=[]; idxs=list(range(len(pts_2d))); poly_sign=None; max_it=len(idxs)*3
+            # Los muros exportados pueden traer muchos nodos colineales sobre
+            # un mismo borde.  El algoritmo de orejas los interpretaba como
+            # puntos dentro de cada triangulo y no encontraba ninguna oreja.
+            # Simplificamos solo para triangular; las aristas originales se
+            # conservan despues para que la malla siga mostrando sus nodos.
+            def cross2(a,b,c):
+                return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0])
+            idxs=[]
+            for idx in range(len(pts_2d)):
+                if not idxs or pts_2d[idx] != pts_2d[idxs[-1]]:
+                    idxs.append(idx)
+            if len(idxs)>1 and pts_2d[idxs[0]] == pts_2d[idxs[-1]]:
+                idxs.pop()
+            changed=True
+            while changed and len(idxs)>3:
+                changed=False
+                for pos in range(len(idxs)):
+                    ai,bi,ci=idxs[pos-1],idxs[pos],idxs[(pos+1)%len(idxs)]
+                    a,b,c=pts_2d[ai],pts_2d[bi],pts_2d[ci]
+                    scale=max(math.hypot(b[0]-a[0],b[1]-a[1]) * math.hypot(c[0]-b[0],c[1]-b[1]),1.0)
+                    if abs(cross2(a,b,c)) <= 1e-10*scale:
+                        idxs.pop(pos)
+                        changed=True
+                        break
+            tris=[]; poly_sign=None; max_it=len(idxs)*3
             while len(idxs)>2 and max_it>0:
                 max_it-=1; found=False; n=len(idxs)
                 if poly_sign is None:
                     area=sum((pts_2d[idxs[j]][0]*pts_2d[idxs[(j+1)%n]][1]-pts_2d[idxs[(j+1)%n]][0]*pts_2d[idxs[j]][1]) for j in range(n))
+                    if abs(area)<=1e-12: return []
                     poly_sign=1 if area>0 else -1
                 for i in range(n):
                     pi,ci,ni=idxs[(i-1)%n],idxs[i],idxs[(i+1)%n]
@@ -687,6 +724,17 @@ def render_3d_model(data):
                                           (2,"Muros FE Shell","rgba(255,160,80,0.70)","rgba(255,190,100,0.95)"),
                                           (3,"Losas nervadas FE","rgba(100,200,190,0.60)","rgba(100,220,210,0.9)")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
+            mesh_edge_keys=set()
+
+            def add_mesh_edge(p1,p2):
+                key=tuple(sorted((tuple(round(p1[k],8) for k in ("X","Y","Z")),
+                                  tuple(round(p2[k],8) for k in ("X","Y","Z")))))
+                if key in mesh_edge_keys: return
+                mesh_edge_keys.add(key)
+                ex["x"].extend([p1["X"],p2["X"],None])
+                ex["y"].extend([p1["Y"],p2["Y"],None])
+                ex["z"].extend([p1["Z"],p2["Z"],None])
+
             for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
@@ -699,10 +747,15 @@ def render_3d_model(data):
                     pts.append(pts[0])
                 off=len(mx["x"])
                 for p in pts[:-1]: mx["x"].append(p["X"]); mx["y"].append(p["Y"]); mx["z"].append(p["Z"])
-                for i0,i1,i2 in triangulate(pts[:-1], opening_map.get(source_sid)):
+                # Conservar todos los segmentos del contorno original,
+                # incluidos los nodos intermedios de los bordes del muro.
+                for ia in range(len(pts)-1):
+                    add_mesh_edge(pts[ia],pts[ia+1])
+                triangles=triangulate(pts[:-1], opening_map.get(source_sid))
+                for i0,i1,i2 in triangles:
                     mx["i"].append(off+i0); mx["j"].append(off+i1); mx["k"].append(off+i2)
-                for p in pts: ex["x"].append(p["X"]); ex["y"].append(p["Y"]); ex["z"].append(p["Z"])
-                ex["x"].extend([pts[0]["X"],None]); ex["y"].extend([pts[0]["Y"],None]); ex["z"].extend([pts[0]["Z"],None])
+                    for ia,ib in ((i0,i1),(i1,i2),(i2,i0)):
+                        add_mesh_edge(pts[ia],pts[ib])
             if mx["x"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
                     color=color,opacity=0.80,name=label,flatshading=True,
