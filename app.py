@@ -601,6 +601,11 @@ def render_3d_model(data):
     else:
         lcs_scale_surf,lcs_scale_bar=0.5,0.4
 
+    fe_elements=_surface_fe_elements(data)
+    fe_counts=Counter(s.get("Type",0) for s in fe_elements)
+    fe_source="SurfaceMeshes" if data.get("SurfaceMeshes") else ("SurfaceMemberRegions" if data.get("SurfaceMemberRegions") else "SurfaceMembers")
+    st.caption(f"Malla FE reconocida — fuente: {fe_source} | Losas: {fe_counts.get(0,0)} | Muros: {fe_counts.get(1,0)+fe_counts.get(2,0)}")
+
     fig=go.Figure()
 
     if show_nodes:
@@ -638,7 +643,6 @@ def render_3d_model(data):
 
     if show_panels:
         fe_surface_ids=add_finite_element_meshes(fig,data,nm)
-        fe_elements=_surface_fe_elements(data)
         opening_map={}
         for op in data.get("SurfaceMemberOpenings",[]):
             sid=op.get("Surface","")
@@ -678,10 +682,10 @@ def render_3d_model(data):
                     (pts_2d[t[0]][1]+pts_2d[t[1]][1]+pts_2d[t[2]][1])/3,op2d) for op2d in ops2d)]
             return tris
 
-        for stype,label,color,ecolor in [(0,"Losas","rgba(100,180,255,0.55)","rgba(100,180,255,0.8)"),
-                                          (1,"Muros","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
-                                          (2,"Muros Shell","rgba(255,160,80,0.55)","rgba(255,160,80,0.8)"),
-                                          (3,"Losas nervadas","rgba(100,200,190,0.55)","rgba(100,200,190,0.8)")]:
+        for stype,label,color,ecolor in [(0,"Losas FE","rgba(100,180,255,0.60)","rgba(100,180,255,0.9)"),
+                                          (1,"Muros FE","rgba(255,160,80,0.70)","rgba(255,190,100,0.95)"),
+                                          (2,"Muros FE Shell","rgba(255,160,80,0.70)","rgba(255,190,100,0.95)"),
+                                          (3,"Losas nervadas FE","rgba(100,200,190,0.60)","rgba(100,220,210,0.9)")]:
             mx={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[]}; ex={"x":[],"y":[],"z":[]}
             for surf in fe_elements:
                 if surf.get("Type",0)!=stype: continue
@@ -701,9 +705,10 @@ def render_3d_model(data):
                 ex["x"].extend([pts[0]["X"],None]); ex["y"].extend([pts[0]["Y"],None]); ex["z"].extend([pts[0]["Z"],None])
             if mx["x"]:
                 fig.add_trace(go.Mesh3d(x=mx["x"],y=mx["y"],z=mx["z"],i=mx["i"],j=mx["j"],k=mx["k"],
-                    color=color,opacity=0.55,name=label,showlegend=True))
+                    color=color,opacity=0.80,name=label,flatshading=True,
+                    hovertemplate=f"<b>{label}</b><extra></extra>",showlegend=True))
                 fig.add_trace(go.Scatter3d(x=ex["x"],y=ex["y"],z=ex["z"],mode='lines',
-                    line=dict(color=ecolor,width=2),name=f"Bordes {label}",connectgaps=False,showlegend=False))
+                    line=dict(color=ecolor,width=1),name=f"Malla {label}",connectgaps=False,showlegend=False))
 
     if show_openings:
         ox,oy,oz=[],[],[]
