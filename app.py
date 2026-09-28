@@ -403,6 +403,146 @@ def render_cross_sections(data):
 # ─────────────────────────────────────────────────
 # MODELO 3D
 # ─────────────────────────────────────────────────
+def _surface_mesh_geometry(mesh, surf, nm):
+    """Convierte una malla FE JSAF local en nodos globales y triangulos validos."""
+    raw_coords=mesh.get("MeshNodes") or []
+    raw_triangles=mesh.get("MeshTriangles") or []
+    if len(raw_coords)<4 or len(raw_triangles)<3:
+        return None
+    try:
+        coords=[float(v) for v in raw_coords]
+        triangles=[int(v) for v in raw_triangles]
+    except (TypeError,ValueError):
+        return None
+    if len(triangles)%3:
+        triangles=triangles[:len(triangles)-len(triangles)%3]
+    if not triangles:
+        return None
+    node_count=max(triangles)+1
+    if node_count<=0:
+        return None
+    if len(coords)==2*node_count:
+        dimensions=2
+    elif len(coords)==3*node_count:
+        dimensions=3
+    elif len(coords)>=2*node_count and len(coords)%2==0:
+        dimensions=2
+    else:
+        return None
+    if any(i<0 or i>=node_count for i in triangles):
+        return None
+
+    surface_points=[]
+    for nid in (surf or {}).get("Nodes",[]):
+        p=nm.get(nid)
+        if p:
+            surface_points.append((p["X"],p["Y"],p["Z"]))
+    if len(surface_points)>1 and _mag(_sub(surface_points[0],surface_points[-1]))<1e-9:
+        surface_points.pop()
+
+    if all(mesh.get(k) is not None for k in ("Ox","Oy","Oz")):
+        origin=(_num(mesh.get("Ox")),_num(mesh.get("Oy")),_num(mesh.get("Oz")))
+    elif surface_points:
+        origin=surface_points[0]
+    else:
+        origin=(0.0,0.0,0.0)
+
+    u=v=normal=None
+    if len(surface_points)>=3:
+        start=min(range(len(surface_points)),key=lambda i:_mag(_sub(surface_points[i],origin)))
+        ordered=surface_points[start:]+surface_points[:start]
+        for i in range(1,len(ordered)):
+            candidate=_norm(_sub(ordered[i],ordered[0]))
+            if _mag(candidate)>1e-9:
+                u=candidate
+                break
+        if u:
+            for i in range(1,len(ordered)):
+                candidate_raw=_sub(ordered[(i+1)%len(ordered)],ordered[i])
+                candidate_perp=(candidate_raw[0]-_dot(candidate_raw,u)*u[0],
+                                candidate_raw[1]-_dot(candidate_raw,u)*u[1],
+                                candidate_raw[2]-_dot(candidate_raw,u)*u[2])
+                candidate=_norm(candidate_perp)
+                if _mag(candidate)>1e-9:
+                    v=candidate
+                    break
+    mesh_normal=_norm((_num(mesh.get("Nx")),_num(mesh.get("Ny")),_num(mesh.get("Nz"))))
+    if not u or not v:
+        normal=mesh_normal if _mag(mesh_normal)>1e-9 else (0.0,0.0,1.0)
+        ref=(1.0,0.0,0.0) if abs(normal[0])<0.9 else (0.0,1.0,0.0)
+        u=_norm(_cross(ref,normal))
+        v=_norm(_cross(normal,u))
+    else:
+        normal=_norm(_cross(u,v))
+        if _mag(mesh_normal)>1e-9 and _dot(normal,mesh_normal)<0:
+            v=(-v[0],-v[1],-v[2])
+            normal=(-normal[0],-normal[1],-normal[2])
+
+    local_points=[]
+    for i in range(node_count):
+        offset=i*dimensions
+        x,y=coords[offset],coords[offset+1]
+        z=coords[offset+2] if dimensions==3 else 0.0
+        local_points.append((x,y,z))
+
+    surface_extent=max((_mag(_sub(p,origin)) for p in surface_points),default=0.0)
+    local_extent=max((_mag(p) for p in local_points),default=0.0)
+    unit_candidates=(1.0,0.001,0.01,0.1,100.0,1000.0)
+    if surface_extent>1e-9 and local_extent>1e-9:
+        scale=min(unit_candidates,key=lambda candidate:abs(math.log10(max(local_extent*candidate,1e-12)/surface_extent)))
+    else:
+        scale=1.0
+
+    global_points=[]
+    for x,y,z in local_points:
+        global_points.append((
+            origin[0]+scale*(u[0]*x+v[0]*y+normal[0]*z),
+            origin[1]+scale*(u[1]*x+v[1]*y+normal[1]*z),
+            origin[2]+scale*(u[2]*x+v[2]*y+normal[2]*z),
+        ))
+    return global_points,triangles
+
+
+def add_finite_element_meshes(fig, data, nm):
+    """Dibuja SurfaceMeshes con triangulos, separando losas y muros."""
+    surfaces={s.get("Id"):s for s in data.get("SurfaceMembers",[]) if s.get("Id")}
+    groups={}
+    rendered=set()
+    for mesh in data.get("SurfaceMeshes") or []:
+        sid=mesh.get("SurfaceMember")
+        surf=surfaces.get(sid)
+        geometry=_surface_mesh_geometry(mesh,surf,nm)
+        if not surf or not geometry:
+            continue
+        points,triangles=geometry
+        stype=surf.get("Type",0)
+        if stype not in groups:
+            groups[stype]={"x":[],"y":[],"z":[],"i":[],"j":[],"k":[],"edges":set()}
+        group=groups[stype]; offset=len(group["x"])
+        group["x"].extend(p[0] for p in points); group["y"].extend(p[1] for p in points); group["z"].extend(p[2] for p in points)
+        for t in range(0,len(triangles),3):
+            a,b,c=(triangles[t],triangles[t+1],triangles[t+2])
+            group["i"].append(offset+a); group["j"].append(offset+b); group["k"].append(offset+c)
+            for e1,e2 in ((a,b),(b,c),(c,a)):
+                group["edges"].add(tuple(sorted((offset+e1,offset+e2))))
+        rendered.add(sid)
+
+    colors={0:("Losas FE","rgba(100,180,255,0.55)","rgba(100,180,255,0.95)"),
+            1:("Muros FE","rgba(255,160,80,0.55)","rgba(255,160,80,0.95)")}
+    for stype,group in groups.items():
+        label,face_color,edge_color=colors.get(stype,(SURFACE_TYPE.get(stype,"Superficies FE"),"rgba(180,180,180,0.55)","rgba(220,220,220,0.95)"))
+        fig.add_trace(go.Mesh3d(x=group["x"],y=group["y"],z=group["z"],
+            i=group["i"],j=group["j"],k=group["k"],color=face_color,
+            opacity=0.65,name=label,flatshading=True,showlegend=True))
+        ex=[]; ey=[]; ez=[]
+        for a,b in group["edges"]:
+            ex.extend([group["x"][a],group["x"][b],None]); ey.extend([group["y"][a],group["y"][b],None]); ez.extend([group["z"][a],group["z"][b],None])
+        if ex:
+            fig.add_trace(go.Scatter3d(x=ex,y=ey,z=ez,mode="lines",
+                line=dict(color=edge_color,width=1),name=f"Malla {label}",showlegend=False,connectgaps=False))
+    return rendered
+
+
 def render_3d_model(data):
     st.markdown('<p class="section-header">📍 Modelo 3D</p>', unsafe_allow_html=True)
     nodes=data.get("PointConnections",[])
@@ -463,6 +603,7 @@ def render_3d_model(data):
             line=dict(color=cmap.get(bt,"#748ffc"),width=3),name=bt,connectgaps=False))
 
     if show_panels:
+        fe_surface_ids=add_finite_element_meshes(fig,data,nm)
         opening_map={}
         for op in data.get("SurfaceMemberOpenings",[]):
             sid=op.get("Surface","")
@@ -508,6 +649,7 @@ def render_3d_model(data):
             for surf in data.get("SurfaceMembers",[]):
                 if surf.get("Type",0)!=stype: continue
                 sid=surf.get("Id","")
+                if sid in fe_surface_ids: continue
                 pts=[nm.get(nid) for nid in surf.get("Nodes",[])]
                 pts=[p for p in pts if p]
                 if len(pts)<3: continue
