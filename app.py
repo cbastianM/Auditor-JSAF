@@ -250,9 +250,18 @@ def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
 
 def project_to_2d(points_3d):
     if len(points_3d)<3: return [(p[0],p[1]) for p in points_3d]
-    p0,p1,p2=points_3d[0],points_3d[1],points_3d[2]
-    v1=(p1[0]-p0[0],p1[1]-p0[1],p1[2]-p0[2]); v2=(p2[0]-p0[0],p2[1]-p0[1],p2[2]-p0[2])
-    nx=abs(v1[1]*v2[2]-v1[2]*v2[1]); ny=abs(v1[2]*v2[0]-v1[0]*v2[2]); nz=abs(v1[0]*v2[1]-v1[1]*v2[0])
+    # No asumir que los tres primeros nodos forman un triangulo:
+    # en muros es frecuente que sean colineales en el mismo borde.
+    p0=points_3d[0]; normal=(0.0,0.0,0.0)
+    for i in range(1,len(points_3d)-1):
+        v1=_sub(points_3d[i],p0)
+        if _mag(v1)<=1e-12: continue
+        for j in range(i+1,len(points_3d)):
+            v2=_sub(points_3d[j],p0)
+            normal=_cross(v1,v2)
+            if _mag(normal)>1e-12: break
+        if _mag(normal)>1e-12: break
+    nx,ny,nz=abs(normal[0]),abs(normal[1]),abs(normal[2])
     if nz>=nx and nz>=ny: return [(p[0],p[1]) for p in points_3d]
     elif ny>=nx:           return [(p[0],p[2]) for p in points_3d]
     else:                  return [(p[1],p[2]) for p in points_3d]
