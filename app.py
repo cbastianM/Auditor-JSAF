@@ -186,6 +186,24 @@ def _as_list(value):
         return value
     return [value]
 
+def _mesh_surface_map(data):
+    """Relaciona el ID de una malla FE con la superficie estructural original."""
+    surface_ids={s.get("Id") for s in (data.get("SurfaceMembers") or []) if s.get("Id")}
+    mapping={sid:sid for sid in surface_ids}
+    for mesh in data.get("SurfaceMeshes") or []:
+        mesh_id=mesh.get("Id")
+        surface_id=mesh.get("SurfaceMember") or mesh.get("Surface")
+        if mesh_id and surface_id:
+            mapping[mesh_id]=surface_id
+    # Algunas exportaciones no incluyen SurfaceMeshes, pero conservan el sufijo :mesh.
+    result_mesh_ids={r.get("MeshMember") for r in (data.get("ResultsMeshes") or []) if r.get("MeshMember")}
+    for mesh_id in mapping.keys() | result_mesh_ids:
+        if isinstance(mesh_id,str) and mesh_id.endswith(":mesh"):
+            base_id=mesh_id[:-5]
+            if base_id in surface_ids:
+                mapping[mesh_id]=base_id
+    return mapping
+
 def _get_dp(obj, label):
     for dp in (obj.get("DesignProperties") or []):
         if dp.get("Label") == label:
@@ -839,6 +857,7 @@ def render_mesh_results(data):
     if not results: return st.info("No hay resultados de malla.")
     lm={**id_name_map(data.get("LoadCases",[])),**id_name_map(data.get("LoadCombinations",[]))}
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
+    mesh_surface_map=_mesh_surface_map(data)
     result_index={}; panel_summary={}
     for r in results:
         pid=r.get("MeshMember","") or ""; lid=_result_load(r)
@@ -857,9 +876,13 @@ def render_mesh_results(data):
     rows=[]
     for pid in sorted(panel_summary.keys(), key=lambda x:str(x)):
         info=panel_summary[pid]; mv=info["max"]
-        s=surf_obj_map.get(pid,{}); lcs=compute_surface_lcs(s,nm) if s else None
+        surface_id=mesh_surface_map.get(pid)
+        s=surf_obj_map.get(surface_id,{})
+        lcs=compute_surface_lcs(s,nm) if s else None
         status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-        rows.append({"Panel":f"Panel {pid}","panel_id":pid,
+        rows.append({"Panel":s.get("Name") or f"Panel {surface_id or pid}","panel_id":pid,
+            "Elemento FE":pid,
+            "Tipo":SURFACE_TYPE.get(s.get("Type"),"No identificado") if s else "No vinculada",
             "Estado":"OK" if info["nz"]>0 else "vacio",
             "|Mx|":f"{mv['Mx']:.2f}","|My|":f"{mv['My']:.2f}",
             "|Nx|":f"{mv['Nx']:.2f}","|Ny|":f"{mv['Ny']:.2f}",
@@ -876,11 +899,12 @@ def render_mesh_results(data):
     load_ids=sorted(set(str(_result_load(r)) for r in results))
     load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
     sc1,sc2=st.columns(2)
-    sel_panel=sc1.selectbox("Panel:",panel_ids,format_func=lambda x:f"Panel {x}",key="sel_panel")
+    panel_labels=dict(zip(df["panel_id"],df["Panel"]+" — "+df["Tipo"]))
+    sel_panel=sc1.selectbox("Panel:",panel_ids,format_func=lambda x:panel_labels.get(x,f"Panel {x}"),key="sel_panel")
     sel_load=load_ids[load_names.index(sc2.selectbox("Caso:",load_names,key="sel_load_m"))]
     r=result_index.get((sel_panel,sel_load))
     if not r: return st.warning("Sin resultado.")
-    s=surf_obj_map.get(sel_panel,{})
+    s=surf_obj_map.get(mesh_surface_map.get(sel_panel),{})
     if has_lcs_vector(s) or s.get("LCSType") is not None:
         lcs=compute_surface_lcs(s,nm); status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
         a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
@@ -986,6 +1010,7 @@ def render_references(data):
     nm_id = id_name_map(data.get("PointConnections",[]))
     bar_map = id_name_map(data.get("CurveMembers",[]))
     surf_map = id_name_map(data.get("SurfaceMembers",[]))
+    mesh_surface_map = _mesh_surface_map(data)
     lc_map = id_name_map(data.get("LoadCases",[]))
     combo_map = id_name_map(data.get("LoadCombinations",[]))
     all_load_map = {**lc_map, **combo_map}
@@ -1102,8 +1127,9 @@ def render_references(data):
         key = (pid, lid)
         if key not in seen_mesh:
             seen_mesh.add(key)
-            pname = surf_map.get(pid, pid) if pid else "—"
-            if pid: add_ref("Resultado Malla", f"Panel {pid} ({pname})", "Superficie", pname, "MeshMember", pid in surf_set)
+            surface_id = mesh_surface_map.get(pid)
+            pname = surf_map.get(surface_id, surface_id or pid) if pid else "—"
+            if pid: add_ref("Resultado Malla", f"Malla FE {pid} ({pname})", "Superficie", pname, "MeshMember", surface_id in surf_set)
             else: broken.append(("Resultado Malla", f"[sin panel]", "Superficie", "— (sin definir)", "MeshMember"))
             lname = all_load_map.get(lid, lid) if lid else "—"
             if lid:
@@ -1113,9 +1139,9 @@ def render_references(data):
                 elif is_cb and not is_lc: load_type = "Combinacion"
                 elif is_lc and is_cb: load_type = "Caso Carga"
                 else: load_type = "Carga/Combo"
-                add_ref("Resultado Malla", f"Panel {pid} ({pname})", load_type, lname, "Load", lid in all_load_set)
+                add_ref("Resultado Malla", f"Malla FE {pid} ({pname})", load_type, lname, "Load", lid in all_load_set)
             else:
-                broken.append(("Resultado Malla", f"Panel {pid} ({pname})", "Carga/Combo", "— (sin definir)", "Load"))
+                broken.append(("Resultado Malla", f"Malla FE {pid} ({pname})", "Carga/Combo", "— (sin definir)", "Load"))
 
     if not refs and not broken:
         return st.info("No hay referencias para analizar.")
