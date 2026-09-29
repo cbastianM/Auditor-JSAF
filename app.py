@@ -185,6 +185,15 @@ def _as_list(value):
         return value
     return [value]
 
+MAX_TABLE_ROWS=500
+def _show_dataframe(df, max_rows=MAX_TABLE_ROWS, **kwargs):
+    """Muestra tablas grandes de forma acotada para no saturar Streamlit."""
+    total=len(df)
+    if total>max_rows:
+        st.caption(f"Mostrando {max_rows} de {total} filas. Use la sección JSON para buscar el elemento completo.")
+        df=df.head(max_rows)
+    st.dataframe(df, width="stretch", **kwargs)
+
 def _mesh_surface_map(data):
     """Relaciona el ID de una malla FE con la superficie estructural original."""
     surface_ids={s.get("Id") for s in (data.get("SurfaceMembers") or []) if s.get("Id")}
@@ -880,7 +889,7 @@ def render_bars(data):
                 "Vector":fmt_vec(b) if has_lcs_vector(b) else "—",
                 "LCS":_status_icon(lcs_status),
                 "Angulo (deg)":f"{angle:.2f}" if angle is not None else "—"})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
+        _show_dataframe(pd.DataFrame(rows), hide_index=True, height=300)
 
     bars_vec=[b for b in bars if has_lcs_vector(b)]
     if bars_vec:
@@ -906,7 +915,7 @@ def render_bars(data):
         filt=st.radio("Filtrar:",["Todos","Correctos","Errores"],horizontal=True,key="fbar_lcs")
         if filt=="Correctos": df2=df2[df2["Estado"]=="✅ OK"]
         elif filt=="Errores": df2=df2[df2["Estado"]=="❌ Error"]
-        st.dataframe(df2, use_container_width=True, hide_index=True)
+        _show_dataframe(df2, hide_index=True)
 
 
 # ─────────────────────────────────────────────────
@@ -939,7 +948,7 @@ def render_surfaces(data):
                 "Rot (deg)":f"{_num(s.get('LCSRotation')):.1f}" if s.get("LCSRotation") is not None else "—",
                 "LCS":_status_icon(status),
                 "Angulo (deg)":f"{angle:.2f}" if angle is not None else "—"})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=300)
+        _show_dataframe(pd.DataFrame(rows), hide_index=True, height=300)
 
     surfs_vec=[s for s in surfs if has_lcs_vector(s)]
     if surfs_vec:
@@ -967,19 +976,19 @@ def render_surfaces(data):
         filt=st.radio("Filtrar:",["Todos","Correctos","Errores"],horizontal=True,key="fsurf_lcs")
         if filt=="Correctos": df2=df2[df2["Estado"]=="✅ OK"]
         elif filt=="Errores": df2=df2[df2["Estado"]=="❌ Error"]
-        st.dataframe(df2, use_container_width=True, hide_index=True)
+        _show_dataframe(df2, hide_index=True)
 
     regs=data.get("SurfaceMemberRegions",[])
     if regs:
         st.markdown(f"**Regiones:** {len(regs)}")
-        st.dataframe(pd.DataFrame([{"ID":r.get("Id",""),"Nombre":r.get("Name",""),
+        _show_dataframe(pd.DataFrame([{"ID":r.get("Id",""),"Nombre":r.get("Name",""),
             "Superficie":r.get("Surface",""),"Espesor":r.get("Thickness",""),
-            "Nodos":len(r.get("Nodes",[]))} for r in regs]),use_container_width=True,hide_index=True,height=200)
+            "Nodos":len(r.get("Nodes",[]))} for r in regs]),hide_index=True,height=200)
     ops=data.get("SurfaceMemberOpenings",[])
     if ops:
         st.markdown(f"**Aberturas:** {len(ops)}")
-        st.dataframe(pd.DataFrame([{"Nombre":o.get("Name",""),"Superficie":o.get("Surface",""),
-            "Nodos":" -> ".join(o.get("Nodes",[]))} for o in ops]),use_container_width=True,hide_index=True)
+        _show_dataframe(pd.DataFrame([{"Nombre":o.get("Name",""),"Superficie":o.get("Surface",""),
+            "Nodos":" -> ".join(o.get("Nodes",[]))} for o in ops]),hide_index=True)
 
 
 def render_supports(data):
@@ -1220,7 +1229,7 @@ Tolerancia de alineacion: **{ANGLE_TOL_DEG}°**
             if filt=="OK": df=df[df["Estado"]=="✅ OK"]
             elif filt=="Error": df=df[df["Estado"]=="❌ Error"]
             elif filt=="Default": df=df[df["Estado"]=="🔵 Default"]
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            _show_dataframe(df, hide_index=True)
 
     with tab_bars:
         bars=data.get("CurveMembers",[])
@@ -1249,7 +1258,7 @@ Tolerancia de alineacion: **{ANGLE_TOL_DEG}°**
             if filt=="OK": df=df[df["Estado"]=="✅ OK"]
             elif filt=="Error": df=df[df["Estado"]=="❌ Error"]
             elif filt=="Default": df=df[df["Estado"]=="🔵 Default"]
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            _show_dataframe(df, hide_index=True)
 
 
 # ─────────────────────────────────────────────────
@@ -1430,17 +1439,17 @@ def render_references(data):
             if rr1d_lc:
                 with st.expander(f"🎯 Por Caso de Carga ({len(rr1d_lc)})", expanded=True):
                     df = pd.DataFrame(rr1d_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if rr1d_co:
                 with st.expander(f"🔀 Por Combinacion ({len(rr1d_co)})", expanded=True):
                     df = pd.DataFrame(rr1d_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if rr1d_mem:
                 with st.expander(f"🔩 Referencias a Barras ({len(rr1d_mem)})", expanded=len(rr1d_mem) <= 20):
                     df = pd.DataFrame(rr1d_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if br1d:
                 st.error(f"{len(br1d)} faltantes en resultados 1D")
@@ -1458,17 +1467,17 @@ def render_references(data):
             if rrm_lc:
                 with st.expander(f"🎯 Por Caso de Carga ({len(rrm_lc)})", expanded=True):
                     df = pd.DataFrame(rrm_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if rrm_co:
                 with st.expander(f"🔀 Por Combinacion ({len(rrm_co)})", expanded=True):
                     df = pd.DataFrame(rrm_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if rrm_mem:
                 with st.expander(f"🧩 Referencias a Superficies ({len(rrm_mem)})", expanded=len(rrm_mem) <= 20):
                     df = pd.DataFrame(rrm_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen","Tipo Destino"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
 
             if brm:
                 st.error(f"{len(brm)} faltantes en resultados malla")
@@ -1490,7 +1499,7 @@ def render_references(data):
             if subset:
                 with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
                     df = pd.DataFrame(subset, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen"]), hide_index=True)
 
     # ─── TAB: CARGAS Y ACCIONES ───
     with tab_car:
@@ -1505,7 +1514,7 @@ def render_references(data):
             if subset:
                 with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
                     df = pd.DataFrame(subset, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen"]), hide_index=True)
 
     # ─── TAB: FALTANTES ───
     with tab_falt:
@@ -1520,12 +1529,12 @@ def render_references(data):
                 items = falt_groups[cat]
                 with st.expander(f"❌ {cat} ({len(items)})", expanded=True):
                     df = pd.DataFrame(items, columns=["Origen","Nombre","Tipo Destino","Destino (ID)","Campo"])
-                    st.dataframe(df.drop(columns=["Origen"]), use_container_width=True, hide_index=True)
+                    _show_dataframe(df.drop(columns=["Origen"]), hide_index=True)
 
     # ── TABLA COMPLETA ──
     with st.expander("📋 Ver todas las referencias", expanded=False):
         df_all = pd.DataFrame(refs, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-        st.dataframe(df_all, use_container_width=True, hide_index=True)
+        _show_dataframe(df_all, hide_index=True)
 
 # ─────────────────────────────────────────────────
 # VALIDACION
@@ -1680,25 +1689,30 @@ uploaded=st.file_uploader("Cargar archivo JSAF (.json)",type=["json"])
 
 if uploaded:
     data=load_json(uploaded)
-    tabs=st.tabs(["📊 Resumen","📍 Modelo 3D","🧱 Materiales","📐 Secciones",
-                   "🔩 Barras","🧩 Superficies","📌 Apoyos","🧭 LCS",
-                   "⚡ Cargas","🎯 Acciones",
-                   "📈 Results 1D","🔺 Malla 2D",
-                   "🔗 Referencias","✅ Validacion","🔍 JSON"])
-    with tabs[0]:  render_overview(data)
-    with tabs[1]:  render_3d_model(data)
-    with tabs[2]:  render_materials(data)
-    with tabs[3]:  render_cross_sections(data)
-    with tabs[4]:  render_bars(data)
-    with tabs[5]:  render_surfaces(data)
-    with tabs[6]:  render_supports(data)
-    with tabs[7]:  render_lcs_global(data)
-    with tabs[8]:  render_loads(data)
-    with tabs[9]:  render_actions(data)
-    with tabs[10]: render_results_1d(data)
-    with tabs[11]: render_mesh_results(data)
-    with tabs[12]: render_references(data)
-    with tabs[13]: render_validation(data)
-    with tabs[14]: render_raw_json(data)
+    # st.tabs() ejecuta y serializa el contenido de todas las pestañas en cada
+    # rerun. En modelos grandes eso duplica tablas masivas de superficies,
+    # regiones, LCS y referencias aunque el usuario solo esté viendo el 3D.
+    # La navegación diferida mantiene las mismas secciones, pero procesa una
+    # sola a la vez y evita que Streamlit sea terminado por falta de memoria.
+    sections={
+        "📊 Resumen":render_overview,
+        "📍 Modelo 3D":render_3d_model,
+        "🧱 Materiales":render_materials,
+        "📐 Secciones":render_cross_sections,
+        "🔩 Barras":render_bars,
+        "🧩 Superficies":render_surfaces,
+        "📌 Apoyos":render_supports,
+        "🧭 LCS":render_lcs_global,
+        "⚡ Cargas":render_loads,
+        "🎯 Acciones":render_actions,
+        "📈 Results 1D":render_results_1d,
+        "🔺 Malla 2D":render_mesh_results,
+        "🔗 Referencias":render_references,
+        "✅ Validacion":render_validation,
+        "🔍 JSON":render_raw_json,
+    }
+    selected_section=st.selectbox("Sección",list(sections),index=1,key="main_section")
+    st.caption("Solo se procesa la sección seleccionada para mantener estable el visor con modelos grandes.")
+    sections[selected_section](data)
 else:
     st.info("Sube un archivo JSAF (.json) para comenzar.")
