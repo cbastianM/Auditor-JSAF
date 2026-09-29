@@ -488,7 +488,7 @@ def render_materials(data):
             Fu = _num(Fu_val or 0)
             row["Fu (MPa)"]=f"{Fu/1e6:.1f}" if Fu>1000 else f"{Fu:.1f}"
         rows.append(row)
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def render_cross_sections(data):
@@ -501,7 +501,7 @@ def render_cross_sections(data):
            "Forma":CS_SHAPE.get(s.get("Shape",-1),str(s.get("Shape",-1))),
            "Parametros (m)":", ".join(f"{_num(p):.3f}" for p in _as_list(s.get("Parameters"))) or "—",
            "Material":", ".join(mm.get(mid, str(mid)[:8]) for mid in _as_list(s.get("Materials")))} for s in secs]
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────────
@@ -812,7 +812,7 @@ def render_3d_model(data):
             orientation="v",x=1.01,y=0.5,xanchor="left",yanchor="middle",
             bgcolor="rgba(20,20,40,0.85)",bordercolor="#0f3460",borderwidth=1,
             font=dict(size=11)))
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
 
     if show_lcs:
         nm_local={n.get("Id"):n for n in data.get("PointConnections",[])}
@@ -856,7 +856,7 @@ def render_3d_model(data):
         c3.metric("❌ Incorrectos",len(err_rows))
         if err_rows:
             st.markdown(f"#### ❌ Elementos incorrectos ({len(err_rows)})")
-            st.dataframe(pd.DataFrame(err_rows),width="stretch",hide_index=True)
+            st.dataframe(pd.DataFrame(err_rows),use_container_width=True,hide_index=True)
         else:
             st.success("✅ Todos los elementos tienen LCS correctamente definido.")
 
@@ -876,7 +876,7 @@ def render_bars(data):
     with c1:
         fig=px.pie(values=list(tc.values()),names=list(tc.keys()),title="Por Tipo",color_discrete_sequence=px.colors.qualitative.Set2)
         fig.update_layout(template="plotly_dark",height=300,margin=dict(t=40,b=0))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
     with c2:
         rows=[]
         for b in bars:
@@ -933,7 +933,7 @@ def render_surfaces(data):
     with c1:
         fig=px.pie(values=list(tc.values()),names=list(tc.keys()),title="Por Tipo",color_discrete_sequence=px.colors.qualitative.Pastel)
         fig.update_layout(template="plotly_dark",height=300,margin=dict(t=40,b=0))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
     with c2:
         rows=[]
         for s in surfs:
@@ -999,7 +999,7 @@ def render_supports(data):
         "Ux":SUPPORT_TRANS.get(s.get("Ux",0),"?"),"Uy":SUPPORT_TRANS.get(s.get("Uy",0),"?"),
         "Uz":SUPPORT_TRANS.get(s.get("Uz",0),"?"),"Rx":SUPPORT_ROT.get(s.get("Fix",0),"?"),
         "Ry":SUPPORT_ROT.get(s.get("Fiy",0),"?"),"Rz":SUPPORT_ROT.get(s.get("Fiz",0),"?")} for s in sups]),
-        width="stretch",hide_index=True)
+        use_container_width=True,hide_index=True)
 
 
 def render_loads(data):
@@ -1010,7 +1010,7 @@ def render_loads(data):
         st.markdown("**Casos de Carga**")
         st.dataframe(pd.DataFrame([{"Nombre":c.get("Name",""),
             "Accion":ACTION_TYPE_LC.get(c.get("ActionType",-1),"?"),
-            "Tipo":LOAD_TYPE.get(c.get("LoadType",c.get("Type",-1)),"?")} for c in cases]),width="stretch",hide_index=True)
+            "Tipo":LOAD_TYPE.get(c.get("LoadType",c.get("Type",-1)),"?")} for c in cases]),use_container_width=True,hide_index=True)
     combos=data.get("LoadCombinations",[])
     if combos:
         st.markdown("**Combinaciones**")
@@ -1019,7 +1019,7 @@ def render_loads(data):
             lids=combo.get("LoadCases",[]); facs=combo.get("LoadFactors",[]); mults=combo.get("Multipliers",[])
             st.dataframe(pd.DataFrame([{"Caso":lm.get(lids[j],lids[j][:12]),
                 "Factor":facs[j] if j<len(facs) else "?","Mult.":mults[j] if j<len(mults) else "?"} for j in range(len(lids))]),
-                width="stretch",hide_index=True)
+                use_container_width=True,hide_index=True)
 
 
 def render_actions(data):
@@ -1030,20 +1030,20 @@ def render_actions(data):
         st.markdown(f"**Puntuales** ({len(pa)})")
         st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Nodo":a.get("ReferenceNode",""),
             "X":a.get("X",0),"Y":a.get("Y",0),"Z":a.get("Z",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in pa]),width="stretch",hide_index=True)
+            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in pa]),use_container_width=True,hide_index=True)
     ca=data.get("CurveActions",[])
     if ca:
         st.markdown(f"**Lineales** ({len(ca)})")
         st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Barra":a.get("Member",a.get("CurveMember","")),
             "Dist.":DISTRIBUTION.get(a.get("Distribution",0),"?"),
             "X":a.get("X",0),"Y":a.get("Y",0),"Z":a.get("Z",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in ca]),width="stretch",hide_index=True)
+            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in ca]),use_container_width=True,hide_index=True)
     sa=data.get("SurfaceActions",[])
     if sa:
         st.markdown(f"**Superficiales** ({len(sa)})")
         st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Superficie":a.get("Member",""),
             "Qx":a.get("Qx",0),"Qy":a.get("Qy",0),"Qz":a.get("Qz",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in sa]),width="stretch",hide_index=True)
+            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in sa]),use_container_width=True,hide_index=True)
 
 
 def render_results_1d(data):
@@ -1081,7 +1081,7 @@ def render_results_1d(data):
     filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="f1d")
     if filt=="Con valores": df=df[df["Estado"]=="OK"]
     elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
-    st.dataframe(df.drop(columns=["bar_id"]),width="stretch",hide_index=True,height=280)
+    st.dataframe(df.drop(columns=["bar_id"]),use_container_width=True,hide_index=True,height=280)
     st.markdown("---"); st.markdown("#### Diagrama detallado")
     bar_ids=df["bar_id"].tolist()
     if not bar_ids: return
@@ -1110,7 +1110,7 @@ def render_results_1d(data):
             if vals: fig.add_trace(go.Scatter(x=secs,y=vals,name=comp,mode='lines+markers',
                 line=dict(color=PLOT_COLORS[i%len(PLOT_COLORS)],width=2),marker=dict(size=5)))
         fig.update_layout(template="plotly_dark",xaxis_title="Posicion (m)",height=400,margin=dict(t=30,b=40),legend=dict(orientation="h",y=1.1))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 def render_mesh_results(data):
@@ -1154,7 +1154,7 @@ def render_mesh_results(data):
     filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="fmesh")
     if filt=="Con valores": df=df[df["Estado"]=="OK"]
     elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
-    st.dataframe(df.drop(columns=["panel_id"]),width="stretch",hide_index=True,height=280)
+    st.dataframe(df.drop(columns=["panel_id"]),use_container_width=True,hide_index=True,height=280)
     st.markdown("---"); st.markdown("#### Diagrama detallado")
     panel_ids=df["panel_id"].tolist()
     if not panel_ids: return
@@ -1182,7 +1182,7 @@ def render_mesh_results(data):
         fig=go.Figure()
         fig.add_trace(go.Bar(x=list(range(1,len(vals)+1)),y=vals,marker_color=["#e94560" if v<0 else "#4a9eff" for v in vals]))
         fig.update_layout(template="plotly_dark",xaxis_title="Nodo FE",yaxis_title=sel,height=350,margin=dict(t=20,b=40))
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, use_container_width=True)
         vc1,vc2,vc3=st.columns(3)
         vc1.metric("Min",f"{min(vals):.3f}"); vc2.metric("Max",f"{max(vals):.3f}"); vc3.metric("Nodos FE",len(vals))
 
@@ -1645,7 +1645,7 @@ def render_validation(data):
         elif ok==total: status,pct="✅","100%"
         else: status,pct="❌",f"{ok}/{total} ({100*ok//total}%)"
         rows.append({"Referencia":name,"Estado":status,"Validas":pct})
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 def render_raw_json(data):
