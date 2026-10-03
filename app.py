@@ -1172,8 +1172,10 @@ def render_references(data):
 # ─────────────────────────────────────────────────
 # INTERPRETE DE ERRORES CON IA (DEEPSEEK)
 # ─────────────────────────────────────────────────
-DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_API_BASE = "https://api.deepseek.com"
+DEEPSEEK_API_URL = DEEPSEEK_API_BASE + "/chat/completions"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+DEEPSEEK_FALLBACK_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 
 AI_SYSTEM_PROMPT = (
     "Eres un ingeniero estructural que explica errores de auditoria de modelos JSAF a un usuario "
@@ -1204,41 +1206,66 @@ def _deepseek_max_tokens():
     except (TypeError, ValueError):
         return 700
 
-def _deepseek_chat(messages, api_key="", timeout=90):
-    """Llama a la API de DeepSeek (compatible con OpenAI) y devuelve el texto de la respuesta."""
-    api_key = api_key or _deepseek_setting("DEEPSEEK_API_KEY")
-    if not api_key:
-        raise RuntimeError("No hay API key de DeepSeek configurada (DEEPSEEK_API_KEY).")
-    model = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
-    payload = json.dumps({
-        "model": model,
-        "messages": messages,
-        "temperature": 0.1,
-        "max_tokens": _deepseek_max_tokens(),
-        "stream": False,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        DEEPSEEK_API_URL,
-        data=payload,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
-        method="POST",
-    )
+def _http_json(req, timeout):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
+            return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         detail = ""
         try:
             detail = e.read().decode("utf-8", "ignore")
         except Exception:
             pass
-        raise RuntimeError(f"DeepSeek respondio HTTP {e.code}: {detail[:400]}")
+        err = RuntimeError(f"HTTP {e.code}: {detail[:400]}")
+        err.status = e.code
+        raise err
     except urllib.error.URLError as e:
         raise RuntimeError(f"No se pudo conectar con DeepSeek: {e.reason}")
-    try:
-        return body["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError, TypeError):
-        raise RuntimeError(f"Respuesta inesperada de DeepSeek: {str(body)[:400]}")
+
+def _deepseek_models(api_key, timeout=20):
+    """Lista los modelos disponibles (sirve para diagnosticar clave y modelos)."""
+    req = urllib.request.Request(
+        DEEPSEEK_API_BASE + "/models",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="GET",
+    )
+    body = _http_json(req, timeout)
+    return [m.get("id") for m in (body.get("data") or []) if isinstance(m, dict) and m.get("id")]
+
+def _deepseek_chat(messages, api_key="", timeout=90):
+    """Llama a DeepSeek. Si el modelo configurado no existe, prueba los alternativos."""
+    api_key = api_key or _deepseek_setting("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise RuntimeError("No hay API key de DeepSeek configurada (DEEPSEEK_API_KEY).")
+    configurado = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
+    candidatos = [configurado] + [m for m in DEEPSEEK_FALLBACK_MODELS if m != configurado]
+    errores = []
+    for modelo in candidatos:
+        payload = json.dumps({
+            "model": modelo,
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": _deepseek_max_tokens(),
+            "stream": False,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            DEEPSEEK_API_URL,
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+            method="POST",
+        )
+        try:
+            body = _http_json(req, timeout)
+        except RuntimeError as e:
+            errores.append(f"{modelo}: {e}")
+            if getattr(e, "status", None) in (400, 404):
+                continue
+            raise
+        try:
+            return body["choices"][0]["message"]["content"].strip(), modelo
+        except (KeyError, IndexError, TypeError):
+            raise RuntimeError(f"Respuesta inesperada de DeepSeek: {str(body)[:400]}")
+    raise RuntimeError("Ningun modelo disponible respondio. " + " | ".join(errores))
 
 def _ai_error_messages(issues):
     """Construye los mensajes (system + user) con el contexto de auditoria y los errores."""
@@ -1268,9 +1295,9 @@ def _ai_error_messages(issues):
 
 def render_ai_error_interpreter(issues):
     """Muestra un panel que envia los errores a DeepSeek y presenta la explicacion."""
-    modelo = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
+    configurado = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
     st.markdown("#### 🤖 Interprete de errores con IA")
-    st.caption(f"La IA (DeepSeek, modelo `{modelo}`) explica el origen de cada error y propone soluciones.")
+    st.caption(f"La IA (DeepSeek) explica el origen de cada error y propone soluciones. Modelo configurado: `{configurado}`.")
     tiene_key = bool(_deepseek_setting("DEEPSEEK_API_KEY"))
     key_input = ""
     if not tiene_key:
@@ -1280,21 +1307,37 @@ def render_ai_error_interpreter(issues):
             key="deepseek_api_key_input",
             help="Tambien puedes definir DEEPSEEK_API_KEY en .streamlit/secrets.toml o como variable de entorno.",
         )
+    api_key = key_input.strip() or _deepseek_setting("DEEPSEEK_API_KEY")
     firma = tuple(issues)
-    if st.button("✨ Explicar errores con IA", type="primary", key="ai_explain_errors"):
-        api_key = key_input.strip() or _deepseek_setting("DEEPSEEK_API_KEY")
+    b1, b2 = st.columns(2)
+    if b1.button("✨ Explicar errores con IA", type="primary", key="ai_explain_errors"):
         if not api_key:
             st.warning("Falta la API key de DeepSeek.")
         else:
             with st.spinner("Consultando a DeepSeek..."):
                 try:
-                    reporte = _deepseek_chat(_ai_error_messages(issues), api_key=api_key)
+                    texto, modelo_usado = _deepseek_chat(_ai_error_messages(issues), api_key=api_key)
+                    st.session_state["ai_error_report"] = {"firma": firma, "texto": texto, "modelo": modelo_usado}
                 except Exception as e:
-                    reporte = f"⚠️ No se pudo obtener la explicacion: {e}"
-            st.session_state["ai_error_report"] = {"firma": firma, "texto": reporte}
+                    st.session_state["ai_error_report"] = {"firma": firma, "error": str(e)}
+    if b2.button("🔌 Probar conexión", key="ai_test_connection"):
+        if not api_key:
+            st.warning("Falta la API key de DeepSeek.")
+        else:
+            with st.spinner("Probando conexión con DeepSeek..."):
+                try:
+                    modelos = _deepseek_models(api_key)
+                    st.success("Conexion OK. Modelos disponibles: " + ", ".join(f"`{m}`" for m in modelos))
+                except Exception as e:
+                    st.error(f"No se pudo conectar con DeepSeek: {e}")
     guardado = st.session_state.get("ai_error_report")
     if guardado and guardado.get("firma") == firma:
-        st.markdown(guardado["texto"])
+        if guardado.get("error"):
+            st.error(f"No se pudo obtener la explicacion: {guardado['error']}")
+        else:
+            if guardado.get("modelo"):
+                st.caption(f"Respuesta generada con `{guardado['modelo']}`.")
+            st.markdown(guardado["texto"])
 
 
 # ─────────────────────────────────────────────────
