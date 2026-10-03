@@ -5,6 +5,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from collections import Counter
+import os
+import urllib.request
+import urllib.error
 
 st.set_page_config(page_title="JSAF Auditor", page_icon="🏗️", layout="wide")
 
@@ -1167,6 +1170,119 @@ def render_references(data):
 
 
 # ─────────────────────────────────────────────────
+# INTERPRETE DE ERRORES CON IA (DEEPSEEK)
+# ─────────────────────────────────────────────────
+DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+
+AI_SYSTEM_PROMPT = (
+    "Eres un ingeniero estructural senior especializado en modelos JSAF y en auditoria de "
+    "modelos de analisis estructural. Explicas errores de forma clara, tecnica y accionable, en espanol. "
+    "Para cada error entrega: (1) que significa, (2) de donde proviene o su causa probable y "
+    "(3) soluciones concretas paso a paso que puede aplicar el usuario. Agrupa errores repetidos, "
+    "usa listas y se conciso. No inventes datos que no aparezcan en el listado."
+)
+
+def _deepseek_setting(name, default=""):
+    """Lee una configuracion de st.secrets o de variables de entorno."""
+    val = ""
+    try:
+        val = st.secrets.get(name, "")
+    except Exception:
+        val = ""
+    return str(val or os.environ.get(name, "") or default).strip()
+
+def _deepseek_chat(messages, api_key="", timeout=90):
+    """Llama a la API de DeepSeek (compatible con OpenAI) y devuelve el texto de la respuesta."""
+    api_key = api_key or _deepseek_setting("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise RuntimeError("No hay API key de DeepSeek configurada (DEEPSEEK_API_KEY).")
+    model = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
+    payload = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": 0.2,
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DEEPSEEK_API_URL,
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", "ignore")
+        except Exception:
+            pass
+        raise RuntimeError(f"DeepSeek respondio HTTP {e.code}: {detail[:400]}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"No se pudo conectar con DeepSeek: {e.reason}")
+    try:
+        return body["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(f"Respuesta inesperada de DeepSeek: {str(body)[:400]}")
+
+def _ai_error_messages(issues):
+    """Construye los mensajes (system + user) con el contexto de auditoria y los errores."""
+    limite = 80
+    mostrados = issues[:limite]
+    lista = "\n".join(f"- {i}" for i in mostrados)
+    extra = "" if len(issues) <= limite else f"\n(Se listan {limite} de {len(issues)} errores; agrupa los patrones repetidos.)"
+    contexto = (
+        "Contexto: app de auditoria visual de modelos JSAF enfocada en geometria, materiales, "
+        "secciones y sistemas de coordenadas locales (LCS).\n"
+        f"Tolerancia angular LCS: {ANGLE_TOL_DEG} grados.\n"
+        "Reglas LCS: en superficies, el eje Z local es la normal al plano y el vector declarado "
+        "(CoordinateX/Y/Z) debe coincidir con X local (LCSType=1) o Y local (LCSType=2). "
+        "En barras, X local va del primer al ultimo nodo y el vector debe coincidir con Y local "
+        "(LCS 0 o 2) o Z local (LCS 1 o 3)."
+    )
+    usuario = (
+        f"{contexto}\n\nErrores detectados ({len(issues)}):\n{lista}{extra}\n\n"
+        "Para cada error explica: que significa, de donde proviene y posibles soluciones."
+    )
+    return [
+        {"role": "system", "content": AI_SYSTEM_PROMPT},
+        {"role": "user", "content": usuario},
+    ]
+
+def render_ai_error_interpreter(issues):
+    """Muestra un panel que envia los errores a DeepSeek y presenta la explicacion."""
+    modelo = _deepseek_setting("DEEPSEEK_MODEL", DEEPSEEK_DEFAULT_MODEL)
+    st.markdown("#### 🤖 Interprete de errores con IA")
+    st.caption(f"La IA (DeepSeek, modelo `{modelo}`) explica el origen de cada error y propone soluciones.")
+    tiene_key = bool(_deepseek_setting("DEEPSEEK_API_KEY"))
+    key_input = ""
+    if not tiene_key:
+        key_input = st.text_input(
+            "API key de DeepSeek",
+            type="password",
+            key="deepseek_api_key_input",
+            help="Tambien puedes definir DEEPSEEK_API_KEY en .streamlit/secrets.toml o como variable de entorno.",
+        )
+    firma = tuple(issues)
+    if st.button("✨ Explicar errores con IA", type="primary", key="ai_explain_errors"):
+        api_key = key_input.strip() or _deepseek_setting("DEEPSEEK_API_KEY")
+        if not api_key:
+            st.warning("Falta la API key de DeepSeek.")
+        else:
+            with st.spinner("Consultando a DeepSeek..."):
+                try:
+                    reporte = _deepseek_chat(_ai_error_messages(issues), api_key=api_key)
+                except Exception as e:
+                    reporte = f"⚠️ No se pudo obtener la explicacion: {e}"
+            st.session_state["ai_error_report"] = {"firma": firma, "texto": reporte}
+    guardado = st.session_state.get("ai_error_report")
+    if guardado and guardado.get("firma") == firma:
+        st.markdown(guardado["texto"])
+
+
+# ─────────────────────────────────────────────────
 # VALIDACION
 # ─────────────────────────────────────────────────
 def render_validation(data):
@@ -1232,6 +1348,7 @@ def render_validation(data):
         with st.expander(f"Ver errores ({len(issues)})", expanded=len(issues)<=20):
             for i in issues[:60]: st.markdown(f"- {i}")
             if len(issues)>60: st.markdown(f"_... y {len(issues)-60} mas_")
+        render_ai_error_interpreter(issues)
     if warns:
         st.warning(f"🟡 {len(warns)} advertencias")
         with st.expander(f"Ver advertencias ({len(warns)})"):
