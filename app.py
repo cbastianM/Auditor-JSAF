@@ -1207,9 +1207,6 @@ def render_validation(data):
     if no_cs: warns.append(f"{len(no_cs)} barras sin seccion")
     no_thick=[s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Thickness") or _num(s.get("Thickness",0))==0]
     if no_thick: warns.append(f"{len(no_thick)} superficies sin espesor")
-    ignorar={"LoadCases","LoadCombinations","PointActions","CurveActions","SurfaceActions","Results1D","ResultsMeshes"}
-    empty_ents=[k for k,v in data.items() if isinstance(v,list) and len(v)==0 and k not in ignorar]
-    if empty_ents: warns.append(f"Entidades vacias: {', '.join(empty_ents)}")
 
     if not issues and not warns: st.success("Sin problemas detectados.")
     if issues:
