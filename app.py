@@ -1176,11 +1176,12 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
 
 AI_SYSTEM_PROMPT = (
-    "Eres un ingeniero estructural senior especializado en modelos JSAF y en auditoria de "
-    "modelos de analisis estructural. Explicas errores de forma clara, tecnica y accionable, en espanol. "
-    "Para cada error entrega: (1) que significa, (2) de donde proviene o su causa probable y "
-    "(3) soluciones concretas paso a paso que puede aplicar el usuario. Agrupa errores repetidos, "
-    "usa listas y se conciso. No inventes datos que no aparezcan en el listado."
+    "Eres un ingeniero estructural que explica errores de auditoria de modelos JSAF a un usuario "
+    "que NO es experto. Responde siempre en espanol, de forma muy breve y facil de entender. "
+    "Estructura: (1) un resumen de 1 o 2 frases; (2) los errores agrupados por tipo, y para cada "
+    "tipo como maximo 3 vinetas: que pasa, por que ocurre y como arreglarlo con pasos concretos. "
+    "Usa lenguaje sencillo, evita formulas y jerga innecesaria, no repitas el listado de errores, "
+    "no inventes datos y limita la respuesta a unas 180 palabras."
 )
 
 def _deepseek_setting(name, default=""):
@@ -1192,6 +1193,12 @@ def _deepseek_setting(name, default=""):
         val = ""
     return str(val or os.environ.get(name, "") or default).strip()
 
+def _deepseek_max_tokens():
+    try:
+        return int(_deepseek_setting("DEEPSEEK_MAX_TOKENS", "700"))
+    except (TypeError, ValueError):
+        return 700
+
 def _deepseek_chat(messages, api_key="", timeout=90):
     """Llama a la API de DeepSeek (compatible con OpenAI) y devuelve el texto de la respuesta."""
     api_key = api_key or _deepseek_setting("DEEPSEEK_API_KEY")
@@ -1201,7 +1208,8 @@ def _deepseek_chat(messages, api_key="", timeout=90):
     payload = json.dumps({
         "model": model,
         "messages": messages,
-        "temperature": 0.2,
+        "temperature": 0.1,
+        "max_tokens": _deepseek_max_tokens(),
         "stream": False,
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -1244,7 +1252,8 @@ def _ai_error_messages(issues):
     )
     usuario = (
         f"{contexto}\n\nErrores detectados ({len(issues)}):\n{lista}{extra}\n\n"
-        "Para cada error explica: que significa, de donde proviene y posibles soluciones."
+        "Explica de forma breve y sencilla: agrupa por tipo, di que pasa, por que ocurre y como arreglarlo. "
+        "Incluye un resumen inicial de 1 o 2 frases y no pases de unas 180 palabras."
     )
     return [
         {"role": "system", "content": AI_SYSTEM_PROMPT},
