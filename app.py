@@ -1284,7 +1284,7 @@ def render_raw_json(data):
 # MAIN
 # ─────────────────────────────────────────────────
 st.markdown("# 🏗️ JSAF Auditor")
-st.markdown("Auditoria visual de modelos estructurales en formato JSAF")
+st.markdown("Auditoria visual de modelos estructurales en formato JSAF, enfocada en elementos geometricos, materiales, secciones y LCS.")
 uploaded=st.file_uploader("Cargar archivo JSAF (.json)",type=["json"])
 
 if uploaded:
