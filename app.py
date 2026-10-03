@@ -1345,10 +1345,14 @@ def render_validation(data):
     if not issues and not warns: st.success("Sin problemas detectados.")
     if issues:
         st.error(f"🔴 {len(issues)} errores")
-        with st.expander(f"Ver errores ({len(issues)})", expanded=len(issues)<=20):
-            for i in issues[:60]: st.markdown(f"- {i}")
-            if len(issues)>60: st.markdown(f"_... y {len(issues)-60} mas_")
-        render_ai_error_interpreter(issues)
+        col_errores, col_ia = st.columns(2, gap="large")
+        with col_errores:
+            st.markdown(f"#### ❌ Errores detectados ({len(issues)})")
+            with st.expander("Ver detalle de errores", expanded=True):
+                for i in issues[:60]: st.markdown(f"- {i}")
+                if len(issues)>60: st.markdown(f"_... y {len(issues)-60} mas_")
+        with col_ia:
+            render_ai_error_interpreter(issues)
     if warns:
         st.warning(f"🟡 {len(warns)} advertencias")
         with st.expander(f"Ver advertencias ({len(warns)})"):
