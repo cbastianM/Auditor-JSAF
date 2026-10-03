@@ -159,7 +159,25 @@ def _status_label(status): return {"ok":"✅ OK","error":"❌ Error","default":"
 # ─────────────────────────────────────────────────
 # HELPERS GENERALES
 # ─────────────────────────────────────────────────
-def load_json(file): return json.load(file)
+# Entidades relevantes para el enfoque actual (geometría, materiales, secciones y LCS).
+# El resto (cargas, resultados y metadatos del solver) se descarta al cargar para
+# no consumir memoria ni tiempo en el visor.
+RELEVANT_ENTITIES = {
+    "ProjectInfo",
+    "Materials",
+    "CrossSections",
+    "PointConnections",
+    "CurveMembers",
+    "SurfaceMembers",
+    "SurfaceMemberRegions",
+    "SurfaceMemberOpenings",
+    "PointSupports",
+    "SurfaceMeshes",
+}
+
+def load_json(file):
+    data=json.load(file)
+    return {k:v for k,v in data.items() if k in RELEVANT_ENTITIES}
 def mc(value,label): return f'<div class="metric-card"><h3>{value}</h3><p>{label}</p></div>'
 def _slen(items):
     try: return len(items) if items is not None else 0
