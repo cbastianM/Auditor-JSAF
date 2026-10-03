@@ -1289,11 +1289,6 @@ uploaded=st.file_uploader("Cargar archivo JSAF (.json)",type=["json"])
 
 if uploaded:
     data=load_json(uploaded)
-    # st.tabs() ejecuta y serializa el contenido de todas las pestañas en cada
-    # rerun. En modelos grandes eso duplica tablas masivas de superficies,
-    # regiones, LCS y referencias aunque el usuario solo esté viendo el 3D.
-    # La navegación diferida mantiene las mismas secciones, pero procesa una
-    # sola a la vez y evita que Streamlit sea terminado por falta de memoria.
     sections={
         "📊 Resumen":render_overview,
         "📍 Modelo 3D":render_3d_model,
@@ -1307,8 +1302,9 @@ if uploaded:
         "✅ Validacion":render_validation,
         "🔍 JSON":render_raw_json,
     }
-    selected_section=st.selectbox("Sección",list(sections),index=1,key="main_section")
-    st.caption("Solo se procesa la sección seleccionada para mantener estable el visor con modelos grandes.")
-    sections[selected_section](data)
+    main_tabs=st.tabs(list(sections))
+    for main_tab,(label,render_section) in zip(main_tabs,sections.items()):
+        with main_tab:
+            render_section(data)
 else:
     st.info("Sube un archivo JSAF (.json) para comenzar.")
