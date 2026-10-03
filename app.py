@@ -35,17 +35,9 @@ CURVE_TYPE     = {0:"General",1:"Beam",2:"Column",10:"SlabRib"}
 SURFACE_TYPE   = {0:"Plate",1:"Wall",2:"Shell",3:"Ribbed Slab"}
 SUPPORT_TRANS  = {0:"Free",1:"Rigid",2:"Flexible",3:"Comp. Only",4:"Tension Only"}
 SUPPORT_ROT    = {0:"Free",1:"Rigid",2:"Flexible"}
-ACTION_TYPE_LC = {0:"Permanent",1:"Variable",2:"Accidental"}
-LOAD_TYPE      = {0:"Self Weight",1:"Others",2:"Prestress",3:"Dynamic",4:"Static",5:"Temperature",6:"Wind",7:"Snow",8:"Maintenance",9:"Fire",10:"Moving",11:"Seismic",12:"Standard"}
-COMB_CATEGORY  = {0:"Undefined",1:"ULS",2:"SLS",3:"ALS",4:"National Std"}
-DISTRIBUTION   = {0:"Uniform",1:"Trapezoidal"}
-PLOT_COLORS    = ["#e94560","#4a9eff","#51cf66","#ffd43b","#cc5de8","#ff922b"]
 
 SURFACE_LCS_TYPE = {0:"Default",1:"Eje X local = vector",2:"Eje Y local = vector"}
 CURVE_LCS_TYPE   = {0:"Eje Y = dir. vector",1:"Eje Z = dir. vector",2:"Eje Y apunta al punto",3:"Eje Z apunta al punto"}
-
-COMPS_1D   = ['N','Vy','Vz','Mx','My','Mz']
-COMPS_MESH = ['Mx','My','Mxy','Vx','Vy','Nx','Ny','Nxy']
 
 LCS_OK_COLOR   = "#51cf66"
 LCS_BAD_COLOR  = "#e94560"
@@ -240,40 +232,6 @@ def _get_dp(obj, label):
             return dp.get("Value")
     return None
 
-def _result_load(r):
-    """Extrae el ID de carga de un resultado, soportando tanto el formato antiguo (Load) como el nuevo (LoadCase/LoadCombination)."""
-    load_id = r.get("Load")
-    if load_id:
-        return load_id
-    rf = r.get("ResultFor")
-    lc = r.get("LoadCase")
-    lcb = r.get("LoadCombination")
-    if lc and (rf == 1 or rf is None):
-        return lc
-    if lcb and (rf in (0, None)):
-        return lcb
-    return lc or lcb or ""
-
-def _result_load_type(r, lc_ids, lc_names, combo_ids, combo_names):
-    """Determina el tipo de carga de un resultado: 'Caso Carga' o 'Combinacion'."""
-    lid = r.get("Load") or r.get("LoadCase") or r.get("LoadCombination") or ""
-    is_lc = lid in lc_ids or lid in lc_names
-    is_cb = lid in combo_ids or lid in combo_names
-    if is_lc and not is_cb: return "Caso Carga"
-    elif is_cb and not is_lc: return "Combinacion"
-    elif is_lc and is_cb: return "Caso Carga"
-    else: return "Carga/Combo"
-
-def nz_ratio_1d(r): 
-    """Calcula la proporción de componentes con valores significativos en resultados 1D.
-    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
-    return sum(1 for c in COMPS_1D if any(abs(_num(v))>1e-9 for v in r.get(c,[])))/len(COMPS_1D)
-
-def nz_ratio_mesh(r): 
-    """Calcula la proporción de componentes con valores significativos en resultados mesh.
-    Un componente se considera 'con valores' si tiene al menos un dato con magnitud > 1e-9"""
-    return sum(1 for c in COMPS_MESH if any(abs(_num(v))>1e-9 for v in r.get(c,[])))/len(COMPS_MESH)
-
 def has_lcs_vector(obj): return any(obj.get(k) is not None and obj.get(k)!=0 for k in ["CoordinateX","CoordinateY","CoordinateZ"])
 def fmt_vec(obj): return f"({obj.get('CoordinateX',0) or 0:.3f}, {obj.get('CoordinateY',0) or 0:.3f}, {obj.get('CoordinateZ',0) or 0:.3f})"
 def fmt_axis(v): return f"({v[0]:.3f},{v[1]:.3f},{v[2]:.3f})"
@@ -448,9 +406,6 @@ def render_overview(data):
         ("GEOMETRÍA",[("Materials","Materiales"),("CrossSections","Secciones"),("PointConnections","Nodos"),
             ("CurveMembers","Barras"),("SurfaceMembers","Superficies"),("SurfaceMemberOpenings","Aberturas"),
             ("SurfaceMemberRegions","Regiones"),("PointSupports","Apoyos")]),
-        ("CARGAS",[("LoadCases","Casos"),("LoadCombinations","Combinaciones"),
-            ("PointActions","Puntuales"),("CurveActions","Lineales"),("SurfaceActions","Superficiales")]),
-        ("RESULTADOS",[("Results1D","1D Barras"),("ResultsMeshes","2D Malla")]),
     ]
     for gn,ents in groups:
         st.markdown(f'<p class="group-label">{gn}</p>', unsafe_allow_html=True)
@@ -1002,191 +957,6 @@ def render_supports(data):
         use_container_width=True,hide_index=True)
 
 
-def render_loads(data):
-    st.markdown('<p class="section-header">⚡ Cargas y Combinaciones</p>', unsafe_allow_html=True)
-    lm=id_name_map(data.get("LoadCases",[]))
-    cases=data.get("LoadCases",[])
-    if cases:
-        st.markdown("**Casos de Carga**")
-        st.dataframe(pd.DataFrame([{"Nombre":c.get("Name",""),
-            "Accion":ACTION_TYPE_LC.get(c.get("ActionType",-1),"?"),
-            "Tipo":LOAD_TYPE.get(c.get("LoadType",c.get("Type",-1)),"?")} for c in cases]),use_container_width=True,hide_index=True)
-    combos=data.get("LoadCombinations",[])
-    if combos:
-        st.markdown("**Combinaciones**")
-        for combo in combos:
-            st.markdown(f"**{combo.get('Name','?')}** — {COMB_CATEGORY.get(combo.get('Category',0),'?')}")
-            lids=combo.get("LoadCases",[]); facs=combo.get("LoadFactors",[]); mults=combo.get("Multipliers",[])
-            st.dataframe(pd.DataFrame([{"Caso":lm.get(lids[j],lids[j][:12]),
-                "Factor":facs[j] if j<len(facs) else "?","Mult.":mults[j] if j<len(mults) else "?"} for j in range(len(lids))]),
-                use_container_width=True,hide_index=True)
-
-
-def render_actions(data):
-    st.markdown('<p class="section-header">🎯 Acciones</p>', unsafe_allow_html=True)
-    lm=id_name_map(data.get("LoadCases",[]))
-    pa=data.get("PointActions",[])
-    if pa:
-        st.markdown(f"**Puntuales** ({len(pa)})")
-        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Nodo":a.get("ReferenceNode",""),
-            "X":a.get("X",0),"Y":a.get("Y",0),"Z":a.get("Z",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in pa]),use_container_width=True,hide_index=True)
-    ca=data.get("CurveActions",[])
-    if ca:
-        st.markdown(f"**Lineales** ({len(ca)})")
-        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Barra":a.get("Member",a.get("CurveMember","")),
-            "Dist.":DISTRIBUTION.get(a.get("Distribution",0),"?"),
-            "X":a.get("X",0),"Y":a.get("Y",0),"Z":a.get("Z",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in ca]),use_container_width=True,hide_index=True)
-    sa=data.get("SurfaceActions",[])
-    if sa:
-        st.markdown(f"**Superficiales** ({len(sa)})")
-        st.dataframe(pd.DataFrame([{"Nombre":a.get("Name",""),"Superficie":a.get("Member",""),
-            "Qx":a.get("Qx",0),"Qy":a.get("Qy",0),"Qz":a.get("Qz",0),
-            "Caso":lm.get(a.get("LoadCase",""),"?")} for a in sa]),use_container_width=True,hide_index=True)
-
-
-def render_results_1d(data):
-    st.markdown('<p class="section-header">📈 Resultados 1D</p>', unsafe_allow_html=True)
-    results=data.get("Results1D",[])
-    if not results: return st.info("No hay resultados 1D.")
-    lm={**id_name_map(data.get("LoadCases",[])),**id_name_map(data.get("LoadCombinations",[]))}
-    nm={n.get("Id"):n for n in data.get("PointConnections",[])}
-    result_index={}; bar_summary={}
-    for r in results:
-        bid=r.get("Member","") or ""; lid=_result_load(r)
-        result_index[(bid,lid)]=r; ratio=nz_ratio_1d(r)
-        if bid not in bar_summary: bar_summary[bid]={"nz":0,"z":0,"max":{c:0 for c in COMPS_1D}}
-        if ratio>0: bar_summary[bid]["nz"]+=1
-        else: bar_summary[bid]["z"]+=1
-        for c in COMPS_1D:
-            vals=[abs(_num(v)) for v in r.get(c,[])]
-            if vals: bar_summary[bid]["max"][c]=max(bar_summary[bid]["max"][c],max(vals))
-    total=len(results); full=sum(1 for r in results if nz_ratio_1d(r)==1.0)
-    partial=sum(1 for r in results if 0<nz_ratio_1d(r)<1.0); empty=sum(1 for r in results if nz_ratio_1d(r)==0)
-    m1,m2,m3,m4=st.columns(4)
-    m1.metric("Total",total); m2.metric("Completos",full); m3.metric("Parciales",partial); m4.metric("Vacios",empty)
-    bar_obj_map={b.get("Id",""):b for b in data.get("CurveMembers",[])}
-    rows=[]
-    for bid in sorted(bar_summary.keys(), key=lambda x:str(x)):
-        info=bar_summary[bid]; mv=info["max"]
-        b=bar_obj_map.get(bid,{}); lcs=compute_bar_lcs(b,nm) if b else None
-        status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
-        rows.append({"Barra":f"Bar {bid}","bar_id":bid,
-            "Estado":"OK" if info["nz"]>0 else "vacio","Casos NZ":info["nz"],
-            "|N|":f"{mv['N']:.2f}","|Vy|":f"{mv['Vy']:.2f}","|Vz|":f"{mv['Vz']:.2f}",
-            "|Mx|":f"{mv['Mx']:.2f}","|My|":f"{mv['My']:.2f}","|Mz|":f"{mv['Mz']:.2f}",
-            "LCS":_status_icon(status),"Ang LCS":f"{angle:.1f}°" if angle is not None else "—"})
-    df=pd.DataFrame(rows)
-    filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="f1d")
-    if filt=="Con valores": df=df[df["Estado"]=="OK"]
-    elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
-    st.dataframe(df.drop(columns=["bar_id"]),use_container_width=True,hide_index=True,height=280)
-    st.markdown("---"); st.markdown("#### Diagrama detallado")
-    bar_ids=df["bar_id"].tolist()
-    if not bar_ids: return
-    load_ids=sorted(set(str(_result_load(r)) for r in results))
-    load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
-    sc1,sc2=st.columns(2)
-    sel_bar=sc1.selectbox("Barra:",bar_ids,format_func=lambda x:f"Bar {x}",key="sel_bar")
-    sel_load=load_ids[load_names.index(sc2.selectbox("Caso:",load_names,key="sel_load"))]
-    r=result_index.get((sel_bar,sel_load))
-    if not r: return st.warning("Sin resultado.")
-    b=bar_obj_map.get(sel_bar,{})
-    if has_lcs_vector(b) or b.get("LCS") is not None:
-        lcs=compute_bar_lcs(b, nm); status,angle=check_bar_lcs(b,lcs) if lcs else ("default",None)
-        a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
-        st.info(f"🧭 LCS Barra {sel_bar}: {_status_label(status)}{a_str} | Vector: {fmt_vec(b)}")
-    secs=r.get("SectionsAt",[])
-    comps={"N (kN)":r.get("N",[]),"Vy (kN)":r.get("Vy",[]),"Vz (kN)":r.get("Vz",[]),
-           "Mx (kNm)":r.get("Mx",[]),"My (kNm)":r.get("My",[]),"Mz (kNm)":r.get("Mz",[])}
-    nz_comps=[n for n,v in comps.items() if any(abs(_num(x))>1e-9 for x in v)]
-    defaults=[c for c in ["Vz (kN)","My (kNm)"] if c in nz_comps] or nz_comps[:2]
-    sel_comps=st.multiselect("Componentes:",list(comps.keys()),default=defaults,key="mc1d")
-    if sel_comps and secs:
-        fig=go.Figure()
-        for i,comp in enumerate(sel_comps):
-            vals=[_num(v) for v in comps.get(comp,[])]
-            if vals: fig.add_trace(go.Scatter(x=secs,y=vals,name=comp,mode='lines+markers',
-                line=dict(color=PLOT_COLORS[i%len(PLOT_COLORS)],width=2),marker=dict(size=5)))
-        fig.update_layout(template="plotly_dark",xaxis_title="Posicion (m)",height=400,margin=dict(t=30,b=40),legend=dict(orientation="h",y=1.1))
-        st.plotly_chart(fig, use_container_width=True)
-
-
-def render_mesh_results(data):
-    st.markdown('<p class="section-header">🔺 Resultados Malla 2D</p>', unsafe_allow_html=True)
-    results=data.get("ResultsMeshes",[])
-    if not results: return st.info("No hay resultados de malla.")
-    lm={**id_name_map(data.get("LoadCases",[])),**id_name_map(data.get("LoadCombinations",[]))}
-    nm={n.get("Id"):n for n in data.get("PointConnections",[])}
-    mesh_surface_map=_mesh_surface_map(data)
-    result_index={}; panel_summary={}
-    for r in results:
-        pid=r.get("MeshMember","") or ""; lid=_result_load(r)
-        result_index[(pid,lid)]=r; ratio=nz_ratio_mesh(r)
-        if pid not in panel_summary: panel_summary[pid]={"nz":0,"z":0,"max":{c:0 for c in COMPS_MESH}}
-        if ratio>0: panel_summary[pid]["nz"]+=1
-        else: panel_summary[pid]["z"]+=1
-        for c in COMPS_MESH:
-            vals=[abs(_num(v)) for v in r.get(c,[])]; 
-            if vals: panel_summary[pid]["max"][c]=max(panel_summary[pid]["max"][c],max(vals))
-    total=len(results); full=sum(1 for r in results if nz_ratio_mesh(r)==1.0)
-    partial=sum(1 for r in results if 0<nz_ratio_mesh(r)<1.0); empty=sum(1 for r in results if nz_ratio_mesh(r)==0)
-    m1,m2,m3,m4=st.columns(4)
-    m1.metric("Total",total); m2.metric("Completos",full); m3.metric("Parciales",partial); m4.metric("Vacios",empty)
-    surf_obj_map={s.get("Id",""):s for s in data.get("SurfaceMembers",[])}
-    rows=[]
-    for pid in sorted(panel_summary.keys(), key=lambda x:str(x)):
-        info=panel_summary[pid]; mv=info["max"]
-        surface_id=mesh_surface_map.get(pid)
-        s=surf_obj_map.get(surface_id,{})
-        lcs=compute_surface_lcs(s,nm) if s else None
-        status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-        rows.append({"Panel":s.get("Name") or f"Panel {surface_id or pid}","panel_id":pid,
-            "Elemento FE":pid,
-            "Tipo":SURFACE_TYPE.get(s.get("Type"),"No identificado") if s else "No vinculada",
-            "Estado":"OK" if info["nz"]>0 else "vacio",
-            "|Mx|":f"{mv['Mx']:.2f}","|My|":f"{mv['My']:.2f}",
-            "|Nx|":f"{mv['Nx']:.2f}","|Ny|":f"{mv['Ny']:.2f}",
-            "|Vx|":f"{mv['Vx']:.2f}","|Vy|":f"{mv['Vy']:.2f}",
-            "LCS":_status_icon(status),"Ang LCS":f"{angle:.1f}°" if angle is not None else "—"})
-    df=pd.DataFrame(rows)
-    filt=st.radio("Filtrar:",["Todos","Con valores","Vacios"],horizontal=True,key="fmesh")
-    if filt=="Con valores": df=df[df["Estado"]=="OK"]
-    elif filt=="Vacios": df=df[df["Estado"]=="vacio"]
-    st.dataframe(df.drop(columns=["panel_id"]),use_container_width=True,hide_index=True,height=280)
-    st.markdown("---"); st.markdown("#### Diagrama detallado")
-    panel_ids=df["panel_id"].tolist()
-    if not panel_ids: return
-    load_ids=sorted(set(str(_result_load(r)) for r in results))
-    load_names=[lm.get(lid,lid[:8]) for lid in load_ids]
-    sc1,sc2=st.columns(2)
-    panel_labels=dict(zip(df["panel_id"],df["Panel"]+" — "+df["Tipo"]))
-    sel_panel=sc1.selectbox("Panel:",panel_ids,format_func=lambda x:panel_labels.get(x,f"Panel {x}"),key="sel_panel")
-    sel_load=load_ids[load_names.index(sc2.selectbox("Caso:",load_names,key="sel_load_m"))]
-    r=result_index.get((sel_panel,sel_load))
-    if not r: return st.warning("Sin resultado.")
-    s=surf_obj_map.get(mesh_surface_map.get(sel_panel),{})
-    if has_lcs_vector(s) or s.get("LCSType") is not None:
-        lcs=compute_surface_lcs(s,nm); status,angle=check_surface_lcs(s,lcs) if lcs else ("default",None)
-        a_str=f" | Error angular: {angle:.2f} deg" if angle is not None else ""
-        rot=s.get("LCSRotation"); r_str=f" | Rot: {_num(rot):.2f} deg" if rot is not None else ""
-        st.info(f"🧭 LCS Panel {sel_panel}: {_status_label(status)}{a_str} | Vector: {fmt_vec(s)}{r_str}")
-    comps={c:r.get(c,[]) for c in COMPS_MESH if r.get(c)}
-    nz_comps={k:v for k,v in comps.items() if any(abs(_num(x))>1e-9 for x in v)}
-    comp_list=list(nz_comps.keys()) if nz_comps else list(comps.keys())
-    if not comp_list: return st.info("Sin componentes con valores.")
-    sel=st.selectbox("Componente:",comp_list,key="sel_comp_m")
-    vals=[_num(v) for v in comps.get(sel,[])]
-    if vals:
-        fig=go.Figure()
-        fig.add_trace(go.Bar(x=list(range(1,len(vals)+1)),y=vals,marker_color=["#e94560" if v<0 else "#4a9eff" for v in vals]))
-        fig.update_layout(template="plotly_dark",xaxis_title="Nodo FE",yaxis_title=sel,height=350,margin=dict(t=20,b=40))
-        st.plotly_chart(fig, use_container_width=True)
-        vc1,vc2,vc3=st.columns(3)
-        vc1.metric("Min",f"{min(vals):.3f}"); vc2.metric("Max",f"{max(vals):.3f}"); vc3.metric("Nodos FE",len(vals))
-
-
 # ─────────────────────────────────────────────────
 # TAB LCS GLOBAL
 # ─────────────────────────────────────────────────
@@ -1272,16 +1042,9 @@ def render_references(data):
     nm_id = id_name_map(data.get("PointConnections",[]))
     bar_map = id_name_map(data.get("CurveMembers",[]))
     surf_map = id_name_map(data.get("SurfaceMembers",[]))
-    mesh_surface_map = _mesh_surface_map(data)
-    lc_map = id_name_map(data.get("LoadCases",[]))
-    combo_map = id_name_map(data.get("LoadCombinations",[]))
-    all_load_map = {**lc_map, **combo_map}
 
     mat_set = set(mm.keys()); cs_set = set(csm.keys()); node_set = set(nm_id.keys())
     bar_set = set(bar_map.keys()); surf_set = set(surf_map.keys())
-    lc_ids = set(lc_map.keys()); lc_names = set(lc_map.values())
-    combo_ids = set(combo_map.keys()); combo_names = set(combo_map.values())
-    all_load_set = lc_ids | combo_ids | lc_names | combo_names
 
     refs = []
     broken = []
@@ -1331,80 +1094,6 @@ def render_references(data):
         nid = sup.get("Node","")
         if nid: add_ref("Apoyo", sup.get("Name",""), "Nodo", nm_id.get(nid, nid), "Node", nid in node_set)
 
-    # PointActions → LoadCase + ReferenceNode
-    for act in data.get("PointActions",[]):
-        lid = act.get("LoadCase","")
-        if lid: add_ref("Accion Puntual", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
-        nid = act.get("ReferenceNode","")
-        if nid: add_ref("Accion Puntual", act.get("Name",""), "Nodo", nm_id.get(nid, nid), "ReferenceNode", nid in node_set)
-
-    # CurveActions → LoadCase + CurveMember
-    for act in data.get("CurveActions",[]):
-        lid = act.get("LoadCase","")
-        if lid: add_ref("Accion Lineal", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
-        bid = act.get("Member", act.get("CurveMember",""))
-        if bid: add_ref("Accion Lineal", act.get("Name",""), "Barra", bar_map.get(bid, bid), "Member", bid in bar_set)
-
-    # SurfaceActions → LoadCase + Member
-    for act in data.get("SurfaceActions",[]):
-        lid = act.get("LoadCase","")
-        if lid: add_ref("Accion Superficial", act.get("Name",""), "Caso Carga", lc_map.get(lid, lid), "LoadCase", lid in lc_ids or lid in lc_names)
-        sid = act.get("Member","")
-        if sid: add_ref("Accion Superficial", act.get("Name",""), "Superficie", surf_map.get(sid, sid), "Member", sid in surf_set)
-
-    # LoadCombinations → LoadCases
-    for combo in data.get("LoadCombinations",[]):
-        lids = combo.get("LoadCases",[]); facs = combo.get("LoadFactors",[])
-        for j, lid in enumerate(lids):
-            fac = facs[j] if j < len(facs) else "?"
-            tname = f"{lc_map.get(lid, lid)} (x{fac})"
-            add_ref("Combinacion", combo.get("Name",""), "Caso Carga", tname, "LoadCases", lid in lc_ids or lid in lc_names)
-
-    # Results1D → CurveMember + Load (distinguiendo Caso vs Combinacion)
-    seen_1d = set()
-    for r in data.get("Results1D",[]):
-        bid = r.get("Member",""); lid = _result_load(r)
-        key = (bid, lid)
-        if key not in seen_1d:
-            seen_1d.add(key)
-            bname = bar_map.get(bid, bid) if bid else "—"
-            if bid: add_ref("Resultado 1D", f"Bar {bid} ({bname})", "Barra", bname, "Member", bid in bar_set)
-            else: broken.append(("Resultado 1D", f"[sin barra]", "Barra", "— (sin definir)", "Member"))
-            lname = all_load_map.get(lid, lid) if lid else "—"
-            if lid:
-                is_lc = lid in lc_ids or lid in lc_names
-                is_cb = lid in combo_ids or lid in combo_names
-                if is_lc and not is_cb: load_type = "Caso Carga"
-                elif is_cb and not is_lc: load_type = "Combinacion"
-                elif is_lc and is_cb: load_type = "Caso Carga"
-                else: load_type = "Carga/Combo"
-                add_ref("Resultado 1D", f"Bar {bid} ({bname})", load_type, lname, "Load", lid in all_load_set)
-            else:
-                broken.append(("Resultado 1D", f"Bar {bid} ({bname})", "Carga/Combo", "— (sin definir)", "Load"))
-
-    # ResultsMeshes → MeshMember + Load (distinguiendo Caso vs Combinacion)
-    seen_mesh = set()
-    for r in data.get("ResultsMeshes",[]):
-        pid = r.get("MeshMember",""); lid = _result_load(r)
-        key = (pid, lid)
-        if key not in seen_mesh:
-            seen_mesh.add(key)
-            surface_id = mesh_surface_map.get(pid)
-            pname = surf_map.get(surface_id, surface_id or pid) if pid else "—"
-            if pid: add_ref("Resultado Malla", f"Malla FE {pid} ({pname})", "Superficie", pname, "MeshMember", surface_id in surf_set)
-            else: broken.append(("Resultado Malla", f"[sin panel]", "Superficie", "— (sin definir)", "MeshMember"))
-            lname = all_load_map.get(lid, lid) if lid else "—"
-            if lid:
-                is_lc = lid in lc_ids or lid in lc_names
-                is_cb = lid in combo_ids or lid in combo_names
-                if is_lc and not is_cb: load_type = "Caso Carga"
-                elif is_cb and not is_lc: load_type = "Combinacion"
-                elif is_lc and is_cb: load_type = "Caso Carga"
-                else: load_type = "Carga/Combo"
-                add_ref("Resultado Malla", f"Malla FE {pid} ({pname})", load_type, lname, "Load", lid in all_load_set)
-            else:
-                broken.append(("Resultado Malla", f"Malla FE {pid} ({pname})", "Carga/Combo", "— (sin definir)", "Load"))
-
     if not refs and not broken:
         return st.info("No hay referencias para analizar.")
 
@@ -1417,72 +1106,9 @@ def render_references(data):
     c3.metric("❌ Rotas", bad_n, delta=f"-{bad_n}" if bad_n > 0 else None)
 
     # ── SUB-TABS POR CATEGORÍA ──
-    tab_res, tab_geo, tab_car, tab_falt = st.tabs([
-        "📈 Resultados", "🏗️ Elementos", "⚡ Cargas y Acciones", "❌ Faltantes"
+    tab_geo, tab_falt = st.tabs([
+        "🏗️ Elementos", "❌ Faltantes"
     ])
-
-    # ─── TAB: RESULTADOS ───
-    with tab_res:
-        rr1d = [r for r in refs if r[0] == "Resultado 1D"]
-        rrm  = [r for r in refs if r[0] == "Resultado Malla"]
-        br1d = [r for r in broken if r[0] == "Resultado 1D"]
-        brm  = [r for r in broken if r[0] == "Resultado Malla"]
-
-        # ── Resultados 1D ──
-        if rr1d:
-            rr1d_load = [r for r in rr1d if r[2] in ("Caso Carga","Combinacion")]
-            rr1d_lc   = [r for r in rr1d_load if r[2] == "Caso Carga"]
-            rr1d_co   = [r for r in rr1d_load if r[2] == "Combinacion"]
-            rr1d_mem  = [r for r in rr1d if r[3] == "Member"]
-            st.markdown(f"#### 📊 Resultados 1D — {len(seen_1d)} pares barra/carga")
-
-            if rr1d_lc:
-                with st.expander(f"🎯 Por Caso de Carga ({len(rr1d_lc)})", expanded=True):
-                    df = pd.DataFrame(rr1d_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if rr1d_co:
-                with st.expander(f"🔀 Por Combinacion ({len(rr1d_co)})", expanded=True):
-                    df = pd.DataFrame(rr1d_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if rr1d_mem:
-                with st.expander(f"🔩 Referencias a Barras ({len(rr1d_mem)})", expanded=len(rr1d_mem) <= 20):
-                    df = pd.DataFrame(rr1d_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if br1d:
-                st.error(f"{len(br1d)} faltantes en resultados 1D")
-        else:
-            st.info("Sin resultados 1D.")
-
-        # ── Resultados Malla ──
-        if rrm:
-            rrm_load = [r for r in rrm if r[2] in ("Caso Carga","Combinacion")]
-            rrm_lc   = [r for r in rrm_load if r[2] == "Caso Carga"]
-            rrm_co   = [r for r in rrm_load if r[2] == "Combinacion"]
-            rrm_mem  = [r for r in rrm if r[3] == "Member"]
-            st.markdown(f"#### 🔺 Resultados Malla 2D — {len(seen_mesh)} pares panel/carga")
-
-            if rrm_lc:
-                with st.expander(f"🎯 Por Caso de Carga ({len(rrm_lc)})", expanded=True):
-                    df = pd.DataFrame(rrm_lc, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if rrm_co:
-                with st.expander(f"🔀 Por Combinacion ({len(rrm_co)})", expanded=True):
-                    df = pd.DataFrame(rrm_co, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if rrm_mem:
-                with st.expander(f"🧩 Referencias a Superficies ({len(rrm_mem)})", expanded=len(rrm_mem) <= 20):
-                    df = pd.DataFrame(rrm_mem, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen","Tipo Destino"]), hide_index=True)
-
-            if brm:
-                st.error(f"{len(brm)} faltantes en resultados malla")
-        else:
-            st.info("Sin resultados de malla 2D.")
 
     # ─── TAB: ELEMENTOS ───
     with tab_geo:
@@ -1495,21 +1121,6 @@ def render_references(data):
             ("🕳️ Aberturas", ["Abertura"]),
         ]
         for label, types in geo_groups:
-            subset = [r for r in refs if r[0] in types]
-            if subset:
-                with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
-                    df = pd.DataFrame(subset, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
-                    _show_dataframe(df.drop(columns=["Origen"]), hide_index=True)
-
-    # ─── TAB: CARGAS Y ACCIONES ───
-    with tab_car:
-        car_groups = [
-            ("🔀 Combinaciones → Casos de Carga", ["Combinacion"]),
-            ("📍 Acciones Puntuales", ["Accion Puntual"]),
-            ("📏 Acciones Lineales", ["Accion Lineal"]),
-            ("🧩 Acciones Superficiales", ["Accion Superficial"]),
-        ]
-        for label, types in car_groups:
             subset = [r for r in refs if r[0] in types]
             if subset:
                 with st.expander(f"{label} ({len(subset)} refs)", expanded=len(subset) <= 20):
@@ -1536,6 +1147,7 @@ def render_references(data):
         df_all = pd.DataFrame(refs, columns=["Origen","Nombre","Tipo Destino","Destino","Campo","OK"])
         _show_dataframe(df_all, hide_index=True)
 
+
 # ─────────────────────────────────────────────────
 # VALIDACION
 # ─────────────────────────────────────────────────
@@ -1544,11 +1156,7 @@ def render_validation(data):
     mat_ids=set(m.get("Id") for m in data.get("Materials",[]))
     cs_ids=set(s.get("Id") for s in data.get("CrossSections",[]))
     node_ids=set(n.get("Id") for n in data.get("PointConnections",[]))
-    bar_ids=set(b.get("Id") for b in data.get("CurveMembers",[]))
     surf_ids=set(s.get("Id") for s in data.get("SurfaceMembers",[]))
-    lc_ids=set(c.get("Id") for c in data.get("LoadCases",[]))
-    combo_ids=set(c.get("Id") for c in data.get("LoadCombinations",[]))
-    all_load_ids=lc_ids|combo_ids
     nm={n.get("Id"):n for n in data.get("PointConnections",[])}
 
     issues=[]; warns=[]
@@ -1575,12 +1183,6 @@ def render_validation(data):
     for sup in data.get("PointSupports",[]):
         if sup.get("Node","") and sup.get("Node","") not in node_ids:
             issues.append(f"Apoyo '{sup.get('Name','')}' → nodo no existe")
-    for a in data.get("CurveActions",[]):
-        if a.get("Member",a.get("CurveMember","")) and a.get("Member",a.get("CurveMember","")) not in bar_ids:
-            issues.append(f"Accion lineal '{a.get('Name','')}' → barra no existe")
-    for a in data.get("SurfaceActions",[]):
-        if a.get("Member","") and a.get("Member","") not in surf_ids:
-            issues.append(f"Accion sup '{a.get('Name','')}' → superficie no existe")
 
     # Verificacion LCS geometrica
     lcs_surf_errors=[]
@@ -1601,15 +1203,12 @@ def render_validation(data):
                 issues.append(f"LCS Barra '{b.get('Name','')}': error angular {angle:.1f}° > {ANGLE_TOL_DEG}°")
                 lcs_bar_errors.append(b.get("Name",""))
 
-    z1=sum(1 for r in data.get("Results1D",[]) if nz_ratio_1d(r)==0)
-    if z1: warns.append(f"Results1D: {z1}/{len(data.get('Results1D',[]))} vacios")
-    zm=sum(1 for r in data.get("ResultsMeshes",[]) if nz_ratio_mesh(r)==0)
-    if zm: warns.append(f"ResultsMeshes: {zm}/{len(data.get('ResultsMeshes',[]))} vacios")
     no_cs=[b.get("Name","?") for b in data.get("CurveMembers",[]) if not b.get("CrossSection")]
     if no_cs: warns.append(f"{len(no_cs)} barras sin seccion")
     no_thick=[s.get("Name","?") for s in data.get("SurfaceMembers",[]) if not s.get("Thickness") or _num(s.get("Thickness",0))==0]
     if no_thick: warns.append(f"{len(no_thick)} superficies sin espesor")
-    empty_ents=[k for k,v in data.items() if isinstance(v,list) and len(v)==0]
+    ignorar={"LoadCases","LoadCombinations","PointActions","CurveActions","SurfaceActions","Results1D","ResultsMeshes"}
+    empty_ents=[k for k,v in data.items() if isinstance(v,list) and len(v)==0 and k not in ignorar]
     if empty_ents: warns.append(f"Entidades vacias: {', '.join(empty_ents)}")
 
     if not issues and not warns: st.success("Sin problemas detectados.")
@@ -1650,7 +1249,8 @@ def render_validation(data):
 
 def render_raw_json(data):
     st.markdown('<p class="section-header">🔍 JSON</p>', unsafe_allow_html=True)
-    keys=[k for k in data.keys() if isinstance(data[k],list)]
+    excluded={"LoadCases","LoadCombinations","PointActions","CurveActions","SurfaceActions","Results1D","ResultsMeshes"}
+    keys=[k for k in data.keys() if isinstance(data[k],list) and k not in excluded]
     sk=st.selectbox("Entidad",keys)
     items=data.get(sk,[])
     if not items:
@@ -1703,10 +1303,6 @@ if uploaded:
         "🧩 Superficies":render_surfaces,
         "📌 Apoyos":render_supports,
         "🧭 LCS":render_lcs_global,
-        "⚡ Cargas":render_loads,
-        "🎯 Acciones":render_actions,
-        "📈 Results 1D":render_results_1d,
-        "🔺 Malla 2D":render_mesh_results,
         "🔗 Referencias":render_references,
         "✅ Validacion":render_validation,
         "🔍 JSON":render_raw_json,
