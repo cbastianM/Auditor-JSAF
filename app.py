@@ -1177,11 +1177,16 @@ DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
 
 AI_SYSTEM_PROMPT = (
     "Eres un ingeniero estructural que explica errores de auditoria de modelos JSAF a un usuario "
-    "que NO es experto. Responde siempre en espanol, de forma muy breve y facil de entender. "
-    "Estructura: (1) un resumen de 1 o 2 frases; (2) los errores agrupados por tipo, y para cada "
-    "tipo como maximo 3 vinetas: que pasa, por que ocurre y como arreglarlo con pasos concretos. "
-    "Usa lenguaje sencillo, evita formulas y jerga innecesaria, no repitas el listado de errores, "
-    "no inventes datos y limita la respuesta a unas 180 palabras."
+    "que puede haber cometido un error al modelar. Responde siempre en espanol, muy breve y facil de entender. "
+    "Estructura: (1) un resumen de 1 o 2 frases; (2) los errores agrupados por tipo y, para cada tipo, "
+    "indica el ORIGEN MAS PROBABLE: 'Error de modelado' (el usuario definio mal algo en el modelo: tipo de LCS, "
+    "vector, seccion, nodos, espesor, etc.) o 'Error de exportacion' (el programa o exportador genero el archivo "
+    "de forma incorrecta o incompleta). Si no hay datos suficientes para decidirlo, marca 'Por confirmar' y di "
+    "como comprobarlo. Luego da maximo 3 vinetas: que pasa, por que ocurre y como arreglarlo. "
+    "Criterios orientativos: desviaciones grandes, de 90 grados o con ejes totalmente distintos y referencias "
+    "faltantes suelen ser error de modelado; desviaciones pequenas, casos aislados, geometria irregular o valores "
+    "incompletos pueden venir de la exportacion. Se claro y respetuoso, el objetivo es ayudar a corregir. "
+    "Usa lenguaje sencillo, no repitas el listado de errores, no inventes datos y limita la respuesta a unas 180 palabras."
 )
 
 def _deepseek_setting(name, default=""):
@@ -1252,7 +1257,8 @@ def _ai_error_messages(issues):
     )
     usuario = (
         f"{contexto}\n\nErrores detectados ({len(issues)}):\n{lista}{extra}\n\n"
-        "Explica de forma breve y sencilla: agrupa por tipo, di que pasa, por que ocurre y como arreglarlo. "
+        "Explica de forma breve y sencilla. Agrupa por tipo, indica si el origen mas probable es error de "
+        "modelado o error de exportacion (o 'Por confirmar'), y di que pasa, por que ocurre y como arreglarlo. "
         "Incluye un resumen inicial de 1 o 2 frases y no pases de unas 180 palabras."
     )
     return [
